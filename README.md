@@ -4,7 +4,7 @@ A lightweight Go-based webhook bridge between FluxCD and Pushover notification s
 
 ## Features
 
-- 🚀 **Ultra-lightweight**: ~10-20MB memory footprint
+- 🚀 **Ultra-lightweight**: ~5-20MB memory footprint
 - ⚡ **Fast**: <100ms webhook response time, <1s cold start
 - 🔒 **Secure**: Bearer token authentication, rootless container, minimal attack surface
 - 🌍 **Multi-arch**: Supports linux/amd64 and linux/arm64
@@ -13,7 +13,7 @@ A lightweight Go-based webhook bridge between FluxCD and Pushover notification s
 
 ## Performance
 
-- Memory usage: ~10-20MB idle, <50MB under load
+- Memory usage: ~5-10MB idle, <50MB under load
 - Response time: <100ms for webhook processing
 - Throughput: 10,000+ RPS on a single instance
 - Binary size: ~7MB
