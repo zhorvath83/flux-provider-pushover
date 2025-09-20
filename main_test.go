@@ -90,6 +90,7 @@ func TestWebhookEndpointTestMode(t *testing.T) {
 	config := &Config{
 		PushoverUserKey:  "test_user",
 		PushoverAPIToken: "test_api_token", // Special test token
+		BearerToken:      "Bearer test_api_token", // HOZZÁADVA
 	}
 	server := NewServer(config)
 
@@ -134,6 +135,7 @@ func TestWebhookInvalidJSON(t *testing.T) {
 	config := &Config{
 		PushoverUserKey:  "test_user",
 		PushoverAPIToken: "test_token",
+		BearerToken:      "Bearer test_token", // HOZZÁADVA
 	}
 	server := NewServer(config)
 
@@ -158,6 +160,7 @@ func TestWebhookEmptyFields(t *testing.T) {
 	config := &Config{
 		PushoverUserKey:  "test_user",
 		PushoverAPIToken: "test_api_token",
+		BearerToken:      "Bearer test_api_token", // HOZZÁADVA
 	}
 	server := NewServer(config)
 
@@ -185,6 +188,7 @@ func TestWebhookLargePayload(t *testing.T) {
 	config := &Config{
 		PushoverUserKey:  "test_user",
 		PushoverAPIToken: "test_token",
+		BearerToken:      "Bearer test_token", // HOZZÁADVA
 	}
 	server := NewServer(config)
 

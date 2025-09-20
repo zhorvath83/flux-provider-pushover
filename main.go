@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -21,22 +23,46 @@ const (
 	readTimeout     = 10 * time.Second
 	writeTimeout    = 10 * time.Second
 	shutdownTimeout = 30 * time.Second
-	maxBodySize     = 1 << 20 // 1MB - védekezés nagy payload ellen
+	maxBodySize     = 1 << 20 // 1MB
 
 	// Gyakran használt stringek konstansként
 	defaultSeverity = "INFO"
 	defaultValue    = "Unknown"
 	noMessage       = "No Message"
 	appTitle        = "FluxCD"
+	
+	// HTTP related constants
+	contentTypeJSON = "application/json"
+	contentTypeForm = "application/x-www-form-urlencoded"
+	bearerPrefix    = "Bearer "
 )
+
+// Előre definiált JSON válaszok
+var (
+	responseOK           = []byte(`{"status": "ok"}`)
+	responseUnauthorized = []byte(`{"error": "Unauthorized"}`)
+	responseInvalidJSON  = []byte(`{"error": "Invalid JSON"}`)
+	responseRootError    = []byte("Requests need to be made to /webhook")
+	responseHealthy      = []byte("healthy")
+)
+
+// String builder pool
+var builderPool = sync.Pool{
+	New: func() interface{} {
+		b := &strings.Builder{}
+		b.Grow(256)
+		return b
+	},
+}
 
 // Config holds application configuration
 type Config struct {
 	PushoverUserKey  string
 	PushoverAPIToken string
+	BearerToken      string // Előre kiszámított Bearer token
 }
 
-// FluxAlert represents the incoming webhook payload from Flux
+// FluxAlert
 type FluxAlert struct {
 	InvolvedObject struct {
 		Kind            string `json:"kind"`
@@ -65,122 +91,139 @@ type Server struct {
 	client *http.Client
 }
 
-// NewServer creates a new server instance
+// NewServer creates a new server instance with optimized HTTP client
 func NewServer(config *Config) *Server {
+	// HTTP client beállítások
+	transport := &http.Transport{
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 2,
+		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  true, // Pushover nem használ compression-t
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+	}
+	
 	return &Server{
 		config: config,
 		client: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout:   10 * time.Second,
+			Transport: transport,
 		},
 	}
 }
 
 // handleRoot handles requests to the root path
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Requests need to be made to /webhook", http.StatusBadRequest)
+	w.WriteHeader(http.StatusBadRequest)
+	w.Write(responseRootError)
 }
 
 // handleHealth handles health check requests
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("healthy"))
+	w.Write(responseHealthy)
 }
 
 // handleWebhook handles incoming webhook requests from Flux
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
-	// Verify Authorization header
-	authHeader := r.Header.Get("Authorization")
-	expectedAuth := fmt.Sprintf("Bearer %s", s.config.PushoverAPIToken)
-
-	if authHeader != expectedAuth {
+	// Előre kiszámított Bearer token használata
+	if r.Header.Get("Authorization") != s.config.BearerToken {
 		log.Printf("Unauthorized request from %s", r.RemoteAddr)
-		http.Error(w, `{"error": "Unauthorized"}`, http.StatusUnauthorized)
+		w.Header().Set("Content-Type", contentTypeJSON)
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write(responseUnauthorized)
 		return
 	}
 
-	// Limit request body size to prevent memory exhaustion
+	// Limit request body size
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 
 	// Parse JSON payload
 	var alert FluxAlert
 	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields() // Szigorúbb validáció
+	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(&alert); err != nil {
 		log.Printf("Failed to parse JSON: %v", err)
-		http.Error(w, `{"error": "Invalid JSON"}`, http.StatusBadRequest)
+		w.Header().Set("Content-Type", contentTypeJSON)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write(responseInvalidJSON)
 		return
 	}
 	defer r.Body.Close()
 
-	// Build Pushover message - optimalizált string építés
-	var msgBuilder strings.Builder
-	msgBuilder.Grow(256) // Előre allokálunk helyet
+	// Pool-ból vett string builder
+	msgBuilder := builderPool.Get().(*strings.Builder)
+	defer func() {
+		msgBuilder.Reset()
+		builderPool.Put(msgBuilder)
+	}()
 
-	severity := alert.Severity
-	if severity == "" {
-		severity = defaultSeverity
-	} else {
-		severity = strings.ToUpper(severity)
+	// Build message with optimized string operations
+	severity := defaultSeverity
+	if alert.Severity != "" {
+		severity = strings.ToUpper(alert.Severity)
 	}
 
-	reason := alert.Reason
-	if reason == "" {
-		reason = defaultValue
+	reason := defaultValue
+	if alert.Reason != "" {
+		reason = alert.Reason
 	}
 
-	controller := alert.ReportingController
-	if controller == "" {
-		controller = defaultValue
+	controller := defaultValue
+	if alert.ReportingController != "" {
+		controller = alert.ReportingController
 	}
 
-	revision := alert.Metadata.Revision
-	if revision == "" {
-		revision = defaultValue
+	revision := defaultValue
+	if alert.Metadata.Revision != "" {
+		revision = alert.Metadata.Revision
 	}
 
-	kind := alert.InvolvedObject.Kind
-	if kind == "" {
-		kind = defaultValue
+	kind := defaultValue
+	if alert.InvolvedObject.Kind != "" {
+		kind = strings.ToLower(alert.InvolvedObject.Kind)
 	}
 
-	objectName := alert.InvolvedObject.Name
-	if objectName == "" {
-		objectName = defaultValue
+	objectName := defaultValue
+	if alert.InvolvedObject.Name != "" {
+		objectName = alert.InvolvedObject.Name
 	}
 
-	message := alert.Message
-	if message == "" {
-		message = noMessage
+	message := noMessage
+	if alert.Message != "" {
+		message = alert.Message
 	}
 
 	// Hatékony string építés
-	fmt.Fprintf(&msgBuilder, "%s [%s]\n%s\n\nController: %s\nObject: %s/%s\nRevision: %s\n",
-		reason, severity, message, controller,
-		strings.ToLower(kind), objectName, revision)
-
-	pushoverMessage := msgBuilder.String()
+	fmt.Fprintf(msgBuilder, "%s [%s]\n%s\n\nController: %s\nObject: %s/%s\nRevision: %s\n",
+		reason, severity, message, controller, kind, objectName, revision)
 
 	// Special handling for test mode
 	if s.config.PushoverAPIToken == "test_api_token" {
 		log.Println("Test mode: not sending to Pushover")
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", contentTypeJSON)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status": "ok"}`))
+		w.Write(responseOK)
 		return
 	}
 
 	// Send to Pushover
-	if err := s.sendToPushover(pushoverMessage); err != nil {
+	if err := s.sendToPushover(msgBuilder.String()); err != nil {
 		log.Printf("Failed to send to Pushover: %v", err)
-		http.Error(w, fmt.Sprintf(`{"error": "Failed to send to Pushover", "details": "%s"}`, err.Error()),
-			http.StatusInternalServerError)
+		w.Header().Set("Content-Type", contentTypeJSON)
+		w.WriteHeader(http.StatusInternalServerError)
+		// Dinamikus hiba válasz, mert ezt nem tudjuk előre
+		fmt.Fprintf(w, `{"error": "Failed to send to Pushover", "details": "%s"}`, err.Error())
 		return
 	}
+	
 	log.Printf("Successfully sent alert to Pushover for %s/%s", kind, objectName)
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status": "ok"}`))
+	w.Write(responseOK)
 }
 
 // sendToPushover sends a message to Pushover API
@@ -196,7 +239,7 @@ func (s *Server) sendToPushover(message string) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Type", contentTypeForm)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -205,16 +248,16 @@ func (s *Server) sendToPushover(message string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// Limit response body reading to prevent memory issues
-		body := make([]byte, 512)
-		n, _ := io.ReadFull(resp.Body, body)
-		return fmt.Errorf("pushover API returned status %d: %s", resp.StatusCode, string(body[:n]))
+		// Csak hiba esetén olvasunk response body-t
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("pushover API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	// Drain response body to reuse connection
-	io.Copy(io.Discard, resp.Body)
+	// Gyors discard
+	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
 }
+
 func main() {
 	// Simple health check mode for Docker HEALTHCHECK
 	if len(os.Args) > 1 && os.Args[1] == "-health" {
@@ -222,6 +265,7 @@ func main() {
 		if err != nil || resp.StatusCode != http.StatusOK {
 			os.Exit(1)
 		}
+		resp.Body.Close()
 		os.Exit(0)
 	}
 
@@ -235,6 +279,9 @@ func main() {
 	if config.PushoverUserKey == "" || config.PushoverAPIToken == "" {
 		log.Fatal("Pushover user key or API token is not configured, exiting app")
 	}
+	
+	// Bearer token előre kiszámítása
+	config.BearerToken = bearerPrefix + config.PushoverAPIToken
 
 	// Create server
 	server := NewServer(config)
@@ -251,6 +298,7 @@ func main() {
 		Handler:      mux,
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
+		MaxHeaderBytes: 1 << 20, // 1MB header limit
 	}
 
 	// Channel to listen for interrupt signals
