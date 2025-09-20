@@ -1,38 +1,56 @@
+# syntax=docker/dockerfile:1
 # Build stage
-FROM golang:1.22-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS builder
+
+# Build arguments for multi-arch
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION=dev
+ARG BUILD_DATE
 
 # Install certificates for HTTPS connections
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates tzdata
 
 # Set working directory
 WORKDIR /build
 
-# Copy go mod files
+# Copy go mod files first for better cache utilization
 COPY go.mod go.sum* ./
 
-# Download dependencies
-RUN go mod download
+# Download dependencies (cached if go.mod/go.sum unchanged)
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy source code
-COPY . .
+COPY *.go ./
 
 # Build the binary with optimizations
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o flux-provider-pushover .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath \
+    -ldflags="-w -s -extldflags '-static' -X main.version=${VERSION} -X main.buildDate=${BUILD_DATE}" \
+    -o flux-provider-pushover .
 
-# Final stage - distroless for minimal attack surface
-FROM gcr.io/distroless/static:nonroot
+# Final stage - scratch for absolute minimal size
+FROM scratch
 
-# Copy certificates
+# Copy certificates and timezone data
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
-# Copy binary
-COPY --from=builder /build/flux-provider-pushover /app/flux-provider-pushover
+# Copy binary with non-root user permissions
+COPY --from=builder --chown=65532:65532 /build/flux-provider-pushover /flux-provider-pushover
 
-# Use non-root user (65532 is the nonroot user in distroless)
-USER nonroot:nonroot
+# Use non-root user
+USER 65532:65532
 
 # Expose port
 EXPOSE 8080
 
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["/flux-provider-pushover", "-health"]
+
 # Run the binary
-ENTRYPOINT ["/app/flux-provider-pushover"]
+ENTRYPOINT ["/flux-provider-pushover"]

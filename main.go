@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,11 +16,18 @@ import (
 )
 
 const (
-	pushoverURL = "https://api.pushover.net/1/messages.json"
-	serverPort  = ":8080"
-	readTimeout = 10 * time.Second
-	writeTimeout = 10 * time.Second
+	pushoverURL     = "https://api.pushover.net/1/messages.json"
+	serverPort      = ":8080"
+	readTimeout     = 10 * time.Second
+	writeTimeout    = 10 * time.Second
 	shutdownTimeout = 30 * time.Second
+	maxBodySize     = 1 << 20 // 1MB - védekezés nagy payload ellen
+
+	// Gyakran használt stringek konstansként
+	defaultSeverity = "INFO"
+	defaultValue    = "Unknown"
+	noMessage       = "No Message"
+	appTitle        = "FluxCD"
 )
 
 // Config holds application configuration
@@ -68,6 +74,7 @@ func NewServer(config *Config) *Server {
 		},
 	}
 }
+
 // handleRoot handles requests to the root path
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Requests need to be made to /webhook", http.StatusBadRequest)
@@ -84,68 +91,75 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// Verify Authorization header
 	authHeader := r.Header.Get("Authorization")
 	expectedAuth := fmt.Sprintf("Bearer %s", s.config.PushoverAPIToken)
-	
+
 	if authHeader != expectedAuth {
 		log.Printf("Unauthorized request from %s", r.RemoteAddr)
 		http.Error(w, `{"error": "Unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
 
+	// Limit request body size to prevent memory exhaustion
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+
 	// Parse JSON payload
 	var alert FluxAlert
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		log.Printf("Failed to read request body: %v", err)
-		http.Error(w, `{"error": "Failed to read request body"}`, http.StatusBadRequest)
-		return
-	}
-	defer r.Body.Close()
-	if err := json.Unmarshal(body, &alert); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields() // Szigorúbb validáció
+
+	if err := decoder.Decode(&alert); err != nil {
 		log.Printf("Failed to parse JSON: %v", err)
 		http.Error(w, `{"error": "Invalid JSON"}`, http.StatusBadRequest)
 		return
 	}
+	defer r.Body.Close()
 
-	// Build Pushover message
-	severity := strings.ToUpper(alert.Severity)
+	// Build Pushover message - optimalizált string építés
+	var msgBuilder strings.Builder
+	msgBuilder.Grow(256) // Előre allokálunk helyet
+
+	severity := alert.Severity
 	if severity == "" {
-		severity = "INFO"
+		severity = defaultSeverity
+	} else {
+		severity = strings.ToUpper(severity)
 	}
 
 	reason := alert.Reason
 	if reason == "" {
-		reason = "Unknown"
+		reason = defaultValue
 	}
 
 	controller := alert.ReportingController
 	if controller == "" {
-		controller = "Unknown"
+		controller = defaultValue
 	}
 
 	revision := alert.Metadata.Revision
 	if revision == "" {
-		revision = "Unknown"
+		revision = defaultValue
 	}
 
 	kind := alert.InvolvedObject.Kind
 	if kind == "" {
-		kind = "Unknown"
+		kind = defaultValue
 	}
+
 	objectName := alert.InvolvedObject.Name
 	if objectName == "" {
-		objectName = "Unknown"
+		objectName = defaultValue
 	}
 
 	message := alert.Message
 	if message == "" {
-		message = "No Message"
+		message = noMessage
 	}
 
-	pushoverMessage := fmt.Sprintf(
-		"%s [%s]\n%s\n\nController: %s\nObject: %s/%s\nRevision: %s\n",
-		reason, severity, message, controller, 
-		strings.ToLower(kind), objectName, revision,
-	)
+	// Hatékony string építés
+	fmt.Fprintf(&msgBuilder, "%s [%s]\n%s\n\nController: %s\nObject: %s/%s\nRevision: %s\n",
+		reason, severity, message, controller,
+		strings.ToLower(kind), objectName, revision)
+
+	pushoverMessage := msgBuilder.String()
 
 	// Special handling for test mode
 	if s.config.PushoverAPIToken == "test_api_token" {
@@ -159,7 +173,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// Send to Pushover
 	if err := s.sendToPushover(pushoverMessage); err != nil {
 		log.Printf("Failed to send to Pushover: %v", err)
-		http.Error(w, fmt.Sprintf(`{"error": "Failed to send to Pushover", "details": "%s"}`, err.Error()), 
+		http.Error(w, fmt.Sprintf(`{"error": "Failed to send to Pushover", "details": "%s"}`, err.Error()),
 			http.StatusInternalServerError)
 		return
 	}
@@ -175,14 +189,14 @@ func (s *Server) sendToPushover(message string) error {
 	data.Set("token", s.config.PushoverAPIToken)
 	data.Set("user", s.config.PushoverUserKey)
 	data.Set("message", message)
-	data.Set("title", "FluxCD")
+	data.Set("title", appTitle)
 
-	req, err := http.NewRequest("POST", pushoverURL, bytes.NewBufferString(data.Encode()))
+	req, err := http.NewRequestWithContext(context.Background(), "POST", pushoverURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -191,13 +205,26 @@ func (s *Server) sendToPushover(message string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("pushover API returned status %d: %s", resp.StatusCode, string(body))
+		// Limit response body reading to prevent memory issues
+		body := make([]byte, 512)
+		n, _ := io.ReadFull(resp.Body, body)
+		return fmt.Errorf("pushover API returned status %d: %s", resp.StatusCode, string(body[:n]))
 	}
 
+	// Drain response body to reuse connection
+	io.Copy(io.Discard, resp.Body)
 	return nil
 }
 func main() {
+	// Simple health check mode for Docker HEALTHCHECK
+	if len(os.Args) > 1 && os.Args[1] == "-health" {
+		resp, err := http.Get("http://localhost:8080/health")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	// Load configuration from environment
 	config := &Config{
 		PushoverUserKey:  os.Getenv("PUSHOVER_USER_KEY"),

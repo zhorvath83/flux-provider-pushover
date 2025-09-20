@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+
+# GitHub
+.github/
+
+# Go test files
+*_test.go
+
+# Documentation
+README.md
+LICENSE
+
+# Basic Memory
+basic-memory/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+flux-provider-pushover
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test coverage
+*.out
+coverage.html
+coverage.txt
