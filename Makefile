@@ -23,6 +23,22 @@ test-coverage: test
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
+# Generate LCOV coverage report using coverco tool
+test-lcov: test
+	@echo "Generating LCOV coverage report..."
+	@mkdir -p coverage
+	@export PATH=$(shell go env GOPATH)/bin:$$PATH && \
+		which gcov2lcov > /dev/null || (echo "Installing gcov2lcov..." && go install github.com/jandelgado/gcov2lcov@latest)
+	@export PATH=$(shell go env GOPATH)/bin:$$PATH && \
+		which coverco > /dev/null || (echo "Installing coverco..." && go install github.com/mkabdelrahman/coverco@latest)
+	@export PATH=$(shell go env GOPATH)/bin:$$PATH && \
+		gcov2lcov -infile=coverage.out -outfile=coverage/lcov.info
+	@echo "LCOV report generated: coverage/lcov.info"
+	@echo ""
+	@echo "Coverage summary:"
+	@export PATH=$(shell go env GOPATH)/bin:$$PATH && \
+		coverco -coverage-dir=coverage -coverage-reports-format=lcov -keep-reports=true .
+
 # Run benchmarks
 bench:
 	go test -bench=. -benchmem -run=^$$
@@ -45,6 +61,7 @@ lint:
 clean:
 	rm -f ${BINARY_NAME}
 	rm -f coverage.out coverage.html
+	rm -rf coverage/
 	rm -rf dist/
 
 # Run locally
@@ -109,6 +126,7 @@ help:
 	@echo "  build         - Build the binary"
 	@echo "  test          - Run tests with race detection"
 	@echo "  test-coverage - Run tests and generate coverage report"
+	@echo "  test-lcov     - Run tests and generate LCOV report"
 	@echo "  bench         - Run benchmarks"
 	@echo "  fmt           - Format code"
 	@echo "  vet           - Run go vet"

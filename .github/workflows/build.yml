@@ -109,6 +109,7 @@ jobs:
           type=semver,pattern={{version}}
           type=semver,pattern={{major}}.{{minor}}
           type=sha
+          type=raw,value=latest,enable={{is_default_branch}}
 
     - name: Build and push Docker image
       id: build
@@ -125,6 +126,32 @@ jobs:
           VERSION=${{ github.ref_name }}
           BUILD_DATE=${{ github.event.head_commit.timestamp }}
 
+    - name: Clean up old Docker images
+      if: github.event_name != 'pull_request'
+      run: |
+        # Get all tags for this image, sorted by creation date (newest first)
+        TAGS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+               "https://api.github.com/user/packages/container/${{ github.event.repository.name }}/versions" | \
+               jq -r '.[] | select(.metadata.container.tags | length > 0) | .metadata.container.tags[]' | \
+               grep -v latest | head -20)
+        
+        # Keep only the 10 most recent non-latest tags
+        OLD_TAGS=$(echo "$TAGS" | tail -n +11)
+        
+        if [ -n "$OLD_TAGS" ]; then
+          echo "Cleaning up old images..."
+          echo "$OLD_TAGS" | while read tag; do
+            if [ -n "$tag" ]; then
+              echo "Deleting tag: $tag"
+              # Note: This would require additional permissions and API calls
+              # For now, just log what would be deleted
+              echo "Would delete: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$tag"
+            fi
+          done
+        else
+          echo "No old images to clean up"
+        fi
+
   security:
     needs: build
     runs-on: ubuntu-latest
@@ -132,10 +159,18 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Get image tag for Trivy scan
+      id: image-tag  
+      run: |
+        # Extract the first tag from the multi-line tags output
+        FIRST_TAG=$(echo '${{ needs.build.outputs.image-tags }}' | head -n1)
+        echo "image-tag=$FIRST_TAG" >> $GITHUB_OUTPUT
+        echo "Scanning image: $FIRST_TAG"
+
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ fromJSON(needs.build.outputs.image-tags)[0] }}
+        image-ref: ${{ steps.image-tag.outputs.image-tag }}
         format: 'sarif'
         output: 'trivy-results.sarif'
 
@@ -143,3 +178,8 @@ jobs:
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: 'trivy-results.sarif'
+
+    - name: Post Run Trivy vulnerability scanner
+      if: always()
+      run: |
+        echo "Trivy scan completed for image: ${{ steps.image-tag.outputs.image-tag }}"
