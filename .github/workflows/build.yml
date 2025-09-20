@@ -57,6 +57,9 @@ jobs:
   build:
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-tags: ${{ steps.meta.outputs.tags }}
     permissions:
       contents: read
       packages: write
@@ -90,6 +93,7 @@ jobs:
           type=sha
 
     - name: Build and push Docker image
+      id: build
       uses: docker/build-push-action@v6
       with:
         context: .
@@ -113,7 +117,7 @@ jobs:
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        image-ref: ${{ fromJSON(needs.build.outputs.image-tags)[0] }}
         format: 'sarif'
         output: 'trivy-results.sarif'
 
