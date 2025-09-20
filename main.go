@@ -30,7 +30,7 @@ const (
 	defaultValue    = "Unknown"
 	noMessage       = "No Message"
 	appTitle        = "FluxCD"
-	
+
 	// HTTP related constants
 	contentTypeJSON = "application/json"
 	contentTypeForm = "application/x-www-form-urlencoded"
@@ -104,7 +104,7 @@ func NewServer(config *Config) *Server {
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 	}
-	
+
 	return &Server{
 		config: config,
 		client: &http.Client{
@@ -219,7 +219,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"error": "Failed to send to Pushover", "details": "%s"}`, err.Error())
 		return
 	}
-	
+
 	log.Printf("Successfully sent alert to Pushover for %s/%s", kind, objectName)
 	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(http.StatusOK)
@@ -279,7 +279,7 @@ func main() {
 	if config.PushoverUserKey == "" || config.PushoverAPIToken == "" {
 		log.Fatal("Pushover user key or API token is not configured, exiting app")
 	}
-	
+
 	// Bearer token előre kiszámítása
 	config.BearerToken = bearerPrefix + config.PushoverAPIToken
 
@@ -294,10 +294,10 @@ func main() {
 
 	// Create HTTP server with timeouts
 	httpServer := &http.Server{
-		Addr:         serverPort,
-		Handler:      mux,
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
+		Addr:           serverPort,
+		Handler:        mux,
+		ReadTimeout:    readTimeout,
+		WriteTimeout:   writeTimeout,
 		MaxHeaderBytes: 1 << 20, // 1MB header limit
 	}
 

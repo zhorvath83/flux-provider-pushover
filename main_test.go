@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +14,11 @@ import (
 	"testing"
 	"time"
 )
+
+// Setup function to disable logging during tests
+func init() {
+	log.SetOutput(io.Discard)
+}
 
 func TestHealthEndpoint(t *testing.T) {
 	config := &Config{
@@ -89,7 +96,7 @@ func TestWebhookEndpointUnauthorized(t *testing.T) {
 func TestWebhookEndpointTestMode(t *testing.T) {
 	config := &Config{
 		PushoverUserKey:  "test_user",
-		PushoverAPIToken: "test_api_token", // Special test token
+		PushoverAPIToken: "test_api_token",        // Special test token
 		BearerToken:      "Bearer test_api_token", // HOZZÁADVA
 	}
 	server := NewServer(config)
@@ -337,6 +344,7 @@ func BenchmarkHandleWebhook(b *testing.B) {
 	config := &Config{
 		PushoverUserKey:  "test_user",
 		PushoverAPIToken: "test_api_token",
+		BearerToken:      "Bearer test_api_token", // Fix missing BearerToken
 	}
 	server := NewServer(config)
 
