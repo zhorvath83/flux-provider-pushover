@@ -48,11 +48,29 @@ jobs:
     - name: Vet
       run: go vet ./...
 
-    - name: Upload coverage
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./coverage.out
-        flags: unittests
+    - name: Generate coverage report
+      run: |
+        go tool cover -func=coverage.out -o=coverage.txt
+        COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}')
+        echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
+        echo "**Test Coverage: $COVERAGE**" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Coverage Details" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        go tool cover -func=coverage.out >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+
+    - name: Coverage Badge
+      run: |
+        COVERAGE_NUM=$(echo $COVERAGE | sed 's/%//')
+        if [ $(echo "$COVERAGE_NUM" | cut -d. -f1) -ge 80 ]; then
+          COLOR="brightgreen"
+        elif [ $(echo "$COVERAGE_NUM" | cut -d. -f1) -ge 60 ]; then
+          COLOR="yellow"  
+        else
+          COLOR="red"
+        fi
+        echo "Coverage: $COVERAGE (Color: $COLOR)" >> $GITHUB_STEP_SUMMARY
 
   build:
     needs: test
