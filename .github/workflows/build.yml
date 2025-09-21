@@ -56,6 +56,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write  # Required for attestations
+      attestations: write  # Required for pushing attestations
     steps:
     - uses: actions/checkout@v4
 
@@ -97,35 +99,33 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        # Enable attestations for supply chain security
+        provenance: true
+        sbom: true
         build-args: |
           VERSION=${{ github.ref_name }}
           BUILD_DATE=${{ github.event.head_commit.timestamp }}
 
-    - name: Clean up old Docker images
+    # Generate artifact attestations for the built images
+    - name: Generate artifact attestation
+      if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/')
+      uses: actions/attest-build-provenance@v2
+      with:
+        subject-path: |
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+        push-to-registry: true
+
+    - name: Container Retention Policy
       if: github.event_name != 'pull_request'
-      run: |
-        # Get all tags for this image, sorted by creation date (newest first)
-        TAGS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-               "https://api.github.com/user/packages/container/${{ github.event.repository.name }}/versions" | \
-               jq -r '.[] | select(.metadata.container.tags | length > 0) | .metadata.container.tags[]' | \
-               grep -v latest | head -20)
-        
-        # Keep only the 10 most recent non-latest tags
-        OLD_TAGS=$(echo "$TAGS" | tail -n +11)
-        
-        if [ -n "$OLD_TAGS" ]; then
-          echo "Cleaning up old images..."
-          echo "$OLD_TAGS" | while read tag; do
-            if [ -n "$tag" ]; then
-              echo "Deleting tag: $tag"
-              # Note: This would require additional permissions and API calls
-              # For now, just log what would be deleted
-              echo "Would delete: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$tag"
-            fi
-          done
-        else
-          echo "No old images to clean up"
-        fi
+      uses: snok/container-retention-policy@v3
+      with:
+        image-names: ${{ github.event.repository.name }}
+        cut-off: 30 days ago UTC
+        keep-at-least: 10
+        keep-n-most-recent: 5
+        skip-tags: latest,main,v*
+        account: user
+        token: ${{ secrets.PAT_4_PRUNE_GHCR }}
 
   security:
     needs: build

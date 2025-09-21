@@ -33,18 +33,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -ldflags="-w -s -extldflags '-static' -X main.version=${VERSION} -X main.buildDate=${BUILD_DATE}" \
     -o flux-provider-pushover ./cmd/server
 
-# Final stage - scratch for absolute minimal size
-FROM scratch
+# Final stage - distroless for minimal size with better compatibility
+FROM gcr.io/distroless/static:nonroot
 
-# Copy certificates and timezone data
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
-
-# Copy binary with non-root user permissions
-COPY --from=builder --chown=65532:65532 /build/flux-provider-pushover /flux-provider-pushover
-
-# Use non-root user
-USER 65532:65532
+# Copy binary (distroless nonroot already runs as user 65532)
+COPY --from=builder /build/flux-provider-pushover /flux-provider-pushover
 
 # Expose port
 EXPOSE 8080
