@@ -12,6 +12,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+
   # Security scanning with gosec
   gosec:
     runs-on: ubuntu-latest
@@ -80,10 +81,80 @@ jobs:
           echo "❌ Gosec scan failed - no results file generated" >> $GITHUB_STEP_SUMMARY
         fi
 
+
+  trivy:
+    needs: gosec
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Get image tag for Trivy scan
+      id: image-tag  
+      run: |
+        # Extract the first tag from the multi-line tags output
+        FIRST_TAG=$(echo '${{ needs.build.outputs.image-tags }}' | head -n1)
+        echo "image-tag=$FIRST_TAG" >> $GITHUB_OUTPUT
+        echo "Scanning image: $FIRST_TAG"
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@0.33.1
+      with:
+        image-ref: ${{ steps.image-tag.outputs.image-tag }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'trivy-results.sarif'
+      continue-on-error: true
+
+    - name: Upload SARIF file as artifact
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: trivy-results
+        path: trivy-results.sarif
+
+    - name: Display Trivy results summary
+      if: always()
+      run: |
+        if [ -f "trivy-results.sarif" ]; then
+          echo "## 🔍 Trivy Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Count vulnerabilities by severity from SARIF
+          CRITICAL=$(jq -r '.runs[0].results[] | select(.level == "error") | .ruleId' trivy-results.sarif 2>/dev/null | wc -l || echo "0")
+          HIGH=$(jq -r '.runs[0].results[] | select(.level == "warning") | .ruleId' trivy-results.sarif 2>/dev/null | wc -l || echo "0")
+          MEDIUM=$(jq -r '.runs[0].results[] | select(.level == "note") | .ruleId' trivy-results.sarif 2>/dev/null | wc -l || echo "0")
+          
+          echo "- **Critical**: $CRITICAL" >> $GITHUB_STEP_SUMMARY
+          echo "- **High**: $HIGH" >> $GITHUB_STEP_SUMMARY  
+          echo "- **Medium**: $MEDIUM" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+            echo "⚠️ **Action required**: Critical or High severity vulnerabilities found!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **No critical or high severity vulnerabilities found**" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "❌ Trivy scan failed - no results file generated" >> $GITHUB_STEP_SUMMARY
+        fi
+
+    - name: Post Run Trivy vulnerability scanner
+      if: always()
+      run: |
+        echo "Trivy scan completed for image: ${{ steps.image-tag.outputs.image-tag }}"
+
   test:
     runs-on: ubuntu-latest
-    # Test runs after security scanning
-    needs: gosec
+    needs: trivy
     steps:
     - uses: actions/checkout@v5
 
@@ -196,74 +267,3 @@ jobs:
         keep-n-most-recent: 5
         image-tags: "!latest"
         dry-run: false
-
-
-  security:
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    steps:
-    - uses: actions/checkout@v5
-
-    - name: Get image tag for Trivy scan
-      id: image-tag  
-      run: |
-        # Extract the first tag from the multi-line tags output
-        FIRST_TAG=$(echo '${{ needs.build.outputs.image-tags }}' | head -n1)
-        echo "image-tag=$FIRST_TAG" >> $GITHUB_OUTPUT
-        echo "Scanning image: $FIRST_TAG"
-
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@0.33.1
-      with:
-        image-ref: ${{ steps.image-tag.outputs.image-tag }}
-        format: 'sarif'
-        output: 'trivy-results.sarif'
-
-    - name: Upload Trivy results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: 'trivy-results.sarif'
-      continue-on-error: true
-
-    - name: Upload SARIF file as artifact
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: trivy-results
-        path: trivy-results.sarif
-
-    - name: Display Trivy results summary
-      if: always()
-      run: |
-        if [ -f "trivy-results.sarif" ]; then
-          echo "## 🔍 Security Scan Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Count vulnerabilities by severity from SARIF
-          CRITICAL=$(jq -r '.runs[0].results[] | select(.level == "error") | .ruleId' trivy-results.sarif 2>/dev/null | wc -l || echo "0")
-          HIGH=$(jq -r '.runs[0].results[] | select(.level == "warning") | .ruleId' trivy-results.sarif 2>/dev/null | wc -l || echo "0")
-          MEDIUM=$(jq -r '.runs[0].results[] | select(.level == "note") | .ruleId' trivy-results.sarif 2>/dev/null | wc -l || echo "0")
-          
-          echo "- **Critical**: $CRITICAL" >> $GITHUB_STEP_SUMMARY
-          echo "- **High**: $HIGH" >> $GITHUB_STEP_SUMMARY  
-          echo "- **Medium**: $MEDIUM" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
-            echo "⚠️ **Action required**: Critical or High severity vulnerabilities found!" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✅ **No critical or high severity vulnerabilities found**" >> $GITHUB_STEP_SUMMARY
-          fi
-        else
-          echo "❌ Trivy scan failed - no results file generated" >> $GITHUB_STEP_SUMMARY
-        fi
-
-    - name: Post Run Trivy vulnerability scanner
-      if: always()
-      run: |
-        echo "Trivy scan completed for image: ${{ steps.image-tag.outputs.image-tag }}"
