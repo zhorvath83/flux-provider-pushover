@@ -12,8 +12,78 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Security scanning with gosec
+  gosec:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Run Gosec Security Scanner
+      uses: securego/gosec@master
+      with:
+        # Generate SARIF report for GitHub Security tab integration
+        # Use config file if exists
+        args: '-conf .gosec.json -no-fail -fmt sarif -out gosec-results.sarif ./...'
+
+    - name: Upload SARIF file to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: gosec-results.sarif
+        category: gosec
+
+    - name: Upload gosec results as artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: gosec-results
+        path: gosec-results.sarif
+        retention-days: 7
+
+    - name: Display gosec results summary
+      if: always()
+      run: |
+        if [ -f "gosec-results.sarif" ]; then
+          echo "## 🔒 Gosec Security Analysis Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Parse SARIF for issue counts by severity
+          HIGH=$(jq -r '[.runs[0].results[]? | select(.level == "error")] | length' gosec-results.sarif 2>/dev/null || echo "0")
+          MEDIUM=$(jq -r '[.runs[0].results[]? | select(.level == "warning")] | length' gosec-results.sarif 2>/dev/null || echo "0")
+          LOW=$(jq -r '[.runs[0].results[]? | select(.level == "note")] | length' gosec-results.sarif 2>/dev/null || echo "0")
+          TOTAL=$(jq -r '[.runs[0].results[]?] | length' gosec-results.sarif 2>/dev/null || echo "0")
+          
+          echo "- **Total Issues**: $TOTAL" >> $GITHUB_STEP_SUMMARY
+          echo "- **High Severity**: $HIGH" >> $GITHUB_STEP_SUMMARY
+          echo "- **Medium Severity**: $MEDIUM" >> $GITHUB_STEP_SUMMARY
+          echo "- **Low Severity**: $LOW" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # List detected rules
+          echo "### Detected Security Rules:" >> $GITHUB_STEP_SUMMARY
+          jq -r '.runs[0].results[]? | "- **\(.ruleId)**: \(.message.text)"' gosec-results.sarif 2>/dev/null | head -10 >> $GITHUB_STEP_SUMMARY || true
+          
+          if [ "$HIGH" -gt 0 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Action required**: High severity security issues found!" >> $GITHUB_STEP_SUMMARY
+          elif [ "$TOTAL" -gt 0 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ Security issues detected. Please review the findings." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **No security issues detected by gosec**" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "❌ Gosec scan failed - no results file generated" >> $GITHUB_STEP_SUMMARY
+        fi
+
   test:
     runs-on: ubuntu-latest
+    # Test runs after security scanning
+    needs: gosec
     steps:
     - uses: actions/checkout@v5
 

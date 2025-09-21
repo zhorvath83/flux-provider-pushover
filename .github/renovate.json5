@@ -94,11 +94,14 @@
         '^Dockerfile$',
       ],
       matchStrings: [
+        '# renovate: datasource=docker depName=(?<depName>\\S+)\\s+FROM\\s+(?<depName2>\\S+):(?<currentValue>\\S+)@(?<currentDigest>sha256:[a-f0-9]+)',
+        'FROM\\s+gcr\\.io/distroless/static:(?<currentValue>\\S+)@(?<currentDigest>sha256:[a-f0-9]+)',
         'FROM\\s+gcr\\.io/distroless/static:(?<currentValue>\\S+)',
       ],
       depNameTemplate: 'gcr.io/distroless/static',
       datasourceTemplate: 'docker',
       versioningTemplate: 'docker',
+      digestUpdateEnabled: true,
     },
     {
       customType: 'regex',

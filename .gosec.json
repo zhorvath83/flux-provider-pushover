@@ -1,0 +1,22 @@
+{
+  "global": {
+    "nosec": "enabled",
+    "audit": "enabled"
+  },
+  "rules": {
+    "G104": {
+      "exclude": [
+        ".*_test\\.go"
+      ]
+    }
+  },
+  "severity": "medium",
+  "confidence": "medium",
+  "exclude-generated": true,
+  "tests": false,
+  "exclude-dir": [
+    "vendor",
+    "coverage",
+    "scripts"
+  ]
+}
