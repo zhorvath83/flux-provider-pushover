@@ -22,7 +22,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
 # Copy source code
-COPY *.go ./
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
 
 # Build the binary with optimizations
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -30,7 +31,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath \
     -ldflags="-w -s -extldflags '-static' -X main.version=${VERSION} -X main.buildDate=${BUILD_DATE}" \
-    -o flux-provider-pushover .
+    -o flux-provider-pushover ./cmd/server
 
 # Final stage - scratch for absolute minimal size
 FROM scratch
