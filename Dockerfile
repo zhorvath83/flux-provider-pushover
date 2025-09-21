@@ -49,6 +49,14 @@ USER 65532:65532
 # Expose port
 EXPOSE 8080
 
+# Required environment variables (must be set at runtime):
+# PUSHOVER_USER_KEY    - Your Pushover user key (required)
+# PUSHOVER_API_TOKEN   - Your Pushover application API token (required)
+# 
+# Optional environment variables:
+# PORT                 - Server port (default: ":8080")
+# PUSHOVER_URL        - Pushover API URL (default: "https://api.pushover.net/1/messages.json")
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD ["/flux-provider-pushover", "-health"]

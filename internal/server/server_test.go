@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,16 +13,21 @@ import (
 	"github.com/zhorvath83/flux-provider-pushover/internal/types"
 )
 
-// MockLogger for testing
+// MockLogger for testing (thread-safe)
 type MockLogger struct {
+	mu       sync.Mutex
 	Messages []string
 }
 
 func (m *MockLogger) Printf(format string, v ...interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.Messages = append(m.Messages, fmt.Sprintf(format, v...))
 }
 
 func (m *MockLogger) Println(v ...interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.Messages = append(m.Messages, fmt.Sprint(v...))
 }
 
