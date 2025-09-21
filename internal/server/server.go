@@ -83,9 +83,9 @@ func (s *Server) WaitForShutdown() error {
 
 // HealthCheck performs a health check (for Docker HEALTHCHECK)
 func HealthCheck(url string) error {
+	// URL is internally controlled and validated
 	// This is only used for Docker HEALTHCHECK with a known, local URL
-	// #nosec G107 - URL is internally controlled and validated
-	resp, err := http.Get(url)
+	resp, err := http.Get(url) // #nosec G107
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
