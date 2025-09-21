@@ -58,12 +58,18 @@ func (p *PushoverClient) SendMessage(ctx context.Context, msg *types.PushoverMes
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 512))
+		if err != nil {
+			return fmt.Errorf("pushover API returned status %d (failed to read body: %w)", resp.StatusCode, err)
+		}
 		return fmt.Errorf("pushover API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Discard response body
-	_, _ = io.Copy(io.Discard, resp.Body)
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		// Log the error but don't fail the request - response was successful
+		return fmt.Errorf("failed to discard response body: %w", err)
+	}
 	return nil
 }
 

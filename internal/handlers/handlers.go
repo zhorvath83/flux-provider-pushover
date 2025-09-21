@@ -30,7 +30,11 @@ type HandlerDependencies struct {
 func CreateRootHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write(types.ResponseRootError)
+		if _, err := w.Write(types.ResponseRootError); err != nil {
+			// Response header already written, can't do much more
+			// This error is logged by the HTTP server itself
+			return
+		}
 	}
 }
 
@@ -38,7 +42,11 @@ func CreateRootHandler() http.HandlerFunc {
 func CreateHealthHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write(types.ResponseHealthy)
+		if _, err := w.Write(types.ResponseHealthy); err != nil {
+			// Response header already written, can't do much more
+			// This error is logged by the HTTP server itself
+			return
+		}
 	}
 }
 
@@ -120,7 +128,11 @@ func CreateWebhookHandler(deps *HandlerDependencies) http.HandlerFunc {
 func writeJSONResponse(w http.ResponseWriter, statusCode int, body []byte) {
 	w.Header().Set("Content-Type", types.ContentTypeJSON)
 	w.WriteHeader(statusCode)
-	w.Write(body)
+	if _, err := w.Write(body); err != nil {
+		// Response header already written, can't do much more
+		// This error is logged by the HTTP server itself
+		return
+	}
 }
 
 // CreateRouter creates the HTTP router with all endpoints

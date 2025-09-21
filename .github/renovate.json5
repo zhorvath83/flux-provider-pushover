@@ -101,7 +101,6 @@
       depNameTemplate: 'gcr.io/distroless/static',
       datasourceTemplate: 'docker',
       versioningTemplate: 'docker',
-      digestUpdateEnabled: true,
     },
     {
       customType: 'regex',
