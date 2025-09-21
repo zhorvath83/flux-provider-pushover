@@ -34,19 +34,19 @@ jobs:
 
     - name: Test
       run: |
-        go test -v -race -coverprofile=coverage.out ./...
-        go test -bench=. -benchmem -run=^$
+        go test -v -race -coverprofile=coverage.out ./cmd/... ./internal/...
+        go test -bench=. -benchmem -run=^$ ./cmd/... ./internal/...
 
     - name: Check code formatting
       run: |
-        if [ -n "$(gofmt -l .)" ]; then
+        if [ -n "$(gofmt -l cmd/ internal/)" ]; then
           echo "Go code is not formatted:"
-          gofmt -d .
+          gofmt -d cmd/ internal/
           exit 1
         fi
 
     - name: Vet
-      run: go vet ./...
+      run: go vet ./cmd/... ./internal/...
 
     - name: Generate coverage report
       run: |

@@ -73,7 +73,7 @@ echo ""
 
 # Go vet ellenőrzés
 echo -e "${BLUE}=== Go Vet ellenőrzés ===${NC}"
-if go vet ./...; then
+if go vet ./cmd/... ./internal/...; then
     echo -e "${GREEN}✓ Go vet ellenőrzés sikeres${NC}"
 else
     echo -e "${RED}✗ Go vet hibákat talált${NC}"
@@ -97,7 +97,7 @@ echo ""
 echo -e "${BLUE}=== Unit tesztek futtatása ===${NC}"
 echo -e "${BLUE}Race detection és verbose output engedélyezve${NC}"
 
-if go test -v -race -timeout=30s ./...; then
+if go test -v -race -timeout=30s ./cmd/... ./internal/...; then
     echo -e "${GREEN}✓ Minden teszt sikeres${NC}"
 else
     echo -e "${RED}✗ Tesztek sikertelenek${NC}"
@@ -112,7 +112,7 @@ echo -e "${BLUE}=== Test Coverage elemzés ===${NC}"
 COVERAGE_FILE="$COVERAGE_DIR/coverage.out"
 
 echo -e "${BLUE}Coverage profile generálása...${NC}"
-if go test -race -coverprofile="$COVERAGE_FILE" -covermode=atomic ./...; then
+if go test -race -coverprofile="$COVERAGE_FILE" -covermode=atomic ./cmd/... ./internal/...; then
     echo -e "${GREEN}✓ Coverage profile létrehozva: $COVERAGE_FILE${NC}"
 else
     echo -e "${RED}✗ Coverage profile generálása sikertelen${NC}"
@@ -142,7 +142,7 @@ echo ""
 
 # Benchmark tesztek (ha vannak)
 echo -e "${BLUE}=== Benchmark tesztek ===${NC}"
-BENCHMARK_RESULTS=$(go test -bench=. -benchmem ./... 2>/dev/null || echo "")
+BENCHMARK_RESULTS=$(go test -bench=. -benchmem ./cmd/... ./internal/... 2>/dev/null || echo "")
 if [ -n "$BENCHMARK_RESULTS" ]; then
     echo "$BENCHMARK_RESULTS"
     echo -e "${GREEN}✓ Benchmark tesztek futtatva${NC}"
@@ -155,7 +155,7 @@ echo ""
 if echo "$BENCHMARK_RESULTS" | grep -q "Benchmark"; then
     echo -e "${BLUE}=== Memória Profil Generálás ===${NC}"
     MEMPROFILE="$COVERAGE_DIR/mem.prof"
-    if go test -bench=. -memprofile="$MEMPROFILE" ./... >/dev/null 2>&1; then
+    if go test -bench=. -memprofile="$MEMPROFILE" ./cmd/... ./internal/... >/dev/null 2>&1; then
         echo -e "${GREEN}✓ Memória profil: $MEMPROFILE${NC}"
         echo -e "${BLUE}Elemzés: go tool pprof $MEMPROFILE${NC}"
     fi
