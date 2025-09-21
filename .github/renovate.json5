@@ -1,141 +1,150 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: [
-    "config:recommended",
-    ":dependencyDashboard",
-    ":semanticCommits",
-    ":automergeAll",
-    "docker:enableMajor",
-    ":enablePreCommit",
-    ":disableRateLimiting"
+    'config:recommended',
+    ':dependencyDashboard',
+    ':semanticCommits',
+    ':automergeAll',
+    'docker:enableMajor',
+    ':enablePreCommit',
+    ':disableRateLimiting',
   ],
-  
-  // Basic configuration
-  dependencyDashboardTitle: "Renovate Dashboard 🤖",
-  assignees: ["@zhorvath83"],
-  timezone: "Europe/Budapest",
-  schedule: ["after 1am and before 6am"],
-  
-  // Automerge configuration
+  dependencyDashboardTitle: 'Renovate Dashboard 🤖',
+  assignees: [
+    '@zhorvath83',
+  ],
+  timezone: 'Europe/Budapest',
+  schedule: [
+    'after 1am and before 6am',
+  ],
   automerge: true,
-  automergeType: "pr",
+  automergeType: 'pr',
   platformAutomerge: true,
-  
-  // Package rules for automerge based on update type
   packageRules: [
     {
-      description: "Automerge non-major updates",
-      matchUpdateTypes: ["minor", "patch", "pin", "digest"],
-      automerge: true
+      matchCategories: [
+        'docker',
+      ],
+      enabled: true,
+      automerge: true,
+      pinDigests: false,
     },
     {
-      description: "Require manual review for major updates",
-      matchUpdateTypes: ["major"],
-      automerge: false
+      description: 'Automerge non-major updates',
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+        'pin',
+        'digest',
+      ],
+      automerge: true,
     },
     {
-      description: "Group Go version updates together",
-      matchPackageNames: ["golang", "go"],
-      groupName: "Go version",
-      automerge: true
+      description: 'Require manual review for major updates',
+      matchUpdateTypes: [
+        'major',
+      ],
+      automerge: false,
     },
     {
-      description: "Automerge GitHub Actions",
-      matchManagers: ["github-actions"],
-      automerge: true
+      description: 'Group Go version updates together',
+      matchPackageNames: [
+        'golang',
+        'go',
+      ],
+      groupName: 'Go version',
+      automerge: true,
     },
     {
-      description: "Label Docker updates",
-      matchDatasources: ["docker"],
-      addLabels: ["docker", "dependencies"]
-    }
+      description: 'Automerge GitHub Actions',
+      matchManagers: [
+        'github-actions',
+      ],
+      automerge: true,
+    },
+    {
+      description: 'Label Docker updates',
+      matchDatasources: [
+        'docker',
+      ],
+      addLabels: [
+        'docker',
+        'dependencies',
+      ],
+    },
   ],
-  
-  // Custom regex managers for Go version tracking and distroless image
   customManagers: [
     {
-      customType: "regex",
-      description: "Update Go version in Dockerfile",
-      managerFilePatterns: ["^Dockerfile$"],
-      matchStrings: [
-        "FROM\\s+--platform=\\$BUILDPLATFORM\\s+golang:(?<currentValue>[\\d\\.]+)-alpine"
+      customType: 'regex',
+      description: 'Update Go version in Dockerfile',
+      managerFilePatterns: [
+        '^Dockerfile$',
       ],
-      depNameTemplate: "golang",
-      datasourceTemplate: "docker",
-      versioningTemplate: "docker"
+      matchStrings: [
+        'FROM\\s+--platform=\\$BUILDPLATFORM\\s+golang:(?<currentValue>[\\d\\.]+)-alpine',
+      ],
+      depNameTemplate: 'golang',
+      datasourceTemplate: 'docker',
+      versioningTemplate: 'docker',
     },
     {
-      customType: "regex",
-      description: "Update distroless image in Dockerfile",
-      managerFilePatterns: ["^Dockerfile$"],
-      matchStrings: [
-        "FROM\\s+gcr\\.io/distroless/static:(?<currentValue>\\S+)"
+      customType: 'regex',
+      description: 'Update distroless image in Dockerfile',
+      managerFilePatterns: [
+        '^Dockerfile$',
       ],
-      depNameTemplate: "gcr.io/distroless/static",
-      datasourceTemplate: "docker",
-      versioningTemplate: "docker"
+      matchStrings: [
+        'FROM\\s+gcr\\.io/distroless/static:(?<currentValue>\\S+)',
+      ],
+      depNameTemplate: 'gcr.io/distroless/static',
+      datasourceTemplate: 'docker',
+      versioningTemplate: 'docker',
     },
     {
-      customType: "regex", 
-      description: "Update Go version in go.mod",
-      managerFilePatterns: ["^go\\.mod$"],
-      matchStrings: [
-        "^go\\s+(?<currentValue>[\\d\\.]+)"
+      customType: 'regex',
+      description: 'Update Go version in go.mod',
+      managerFilePatterns: [
+        '^go\\.mod$',
       ],
-      depNameTemplate: "go",
-      datasourceTemplate: "golang-version",
-      versioningTemplate: "semver"
+      matchStrings: [
+        '^go\\s+(?<currentValue>[\\d\\.]+)',
+      ],
+      depNameTemplate: 'go',
+      datasourceTemplate: 'golang-version',
+      versioningTemplate: 'semver',
     },
     {
-      customType: "regex",
-      description: "Update Go version in GitHub Actions",
-      managerFilePatterns: ["^\\.github/workflows/.+\\.ya?ml$"],
-      matchStrings: [
-        "go-version:\\s+['\"]?(?<currentValue>[\\d\\.]+)['\"]?"
+      customType: 'regex',
+      description: 'Update Go version in GitHub Actions',
+      managerFilePatterns: [
+        '^\\.github/workflows/.+\\.ya?ml$',
       ],
-      depNameTemplate: "go",
-      datasourceTemplate: "golang-version",
-      versioningTemplate: "semver"
-    }
+      matchStrings: [
+        'go-version:\\s+[\'"]?(?<currentValue>[\\d\\.]+)[\'"]?',
+      ],
+      depNameTemplate: 'go',
+      datasourceTemplate: 'golang-version',
+      versioningTemplate: 'semver',
+    },
   ],
-  
-  // GitHub Actions configuration
-  "github-actions": {
-    enabled: true,
-    automerge: true
-  },
-  
-  // Docker configuration
-  docker: {
+  'github-actions': {
     enabled: true,
     automerge: true,
-    // Pin digests for better reproducibility
-    pinDigests: false
   },
-  
-  // Go modules configuration (for future use if dependencies are added)
   gomod: {
     enabled: true,
-    automerge: true
+    automerge: true,
   },
-  
-  // Commit message configuration
-  commitMessagePrefix: "chore(deps):",
-  commitMessageAction: "update",
-  commitMessageTopic: "{{depName}}",
-  commitMessageExtra: "to v{{#if isPinDigest}}{{{newDigestShort}}}{{else}}{{#if isMajor}}{{prettyNewMajor}}{{else}}{{prettyNewVersion}}{{/if}}{{/if}}",
-  
-  // PR configuration
+  commitMessagePrefix: 'chore(deps):',
+  commitMessageAction: 'update',
+  commitMessageTopic: '{{depName}}',
+  commitMessageExtra: 'to v{{#if isPinDigest}}{{{newDigestShort}}}{{else}}{{#if isMajor}}{{prettyNewMajor}}{{else}}{{prettyNewVersion}}{{/if}}{{/if}}',
   prConcurrentLimit: 10,
-  prCreation: "immediate",
+  prCreation: 'immediate',
   prHourlyLimit: 0,
-  
-  // Branch configuration
-  rebaseWhen: "auto",
-  
-  // Vulnerability alerts
+  rebaseWhen: 'auto',
   vulnerabilityAlerts: {
     enabled: true,
-    automerge: true
-  }
+    automerge: true,
+  },
 }
