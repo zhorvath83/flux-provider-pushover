@@ -119,13 +119,14 @@ jobs:
       if: github.event_name != 'pull_request'
       uses: snok/container-retention-policy@v3.0.0
       with:
-        image-names: ${{ github.event.repository.name }}
-        cut-off: 30 days ago UTC
-        keep-at-least: 10
-        keep-n-most-recent: 5
-        skip-tags: latest,main,v*
         account: user
         token: ${{ secrets.PAT_4_PRUNE_GHCR }}
+        image-names: ${{ github.event.repository.name }}
+        cut-off: 4w
+        keep-n-most-recent: 5
+        image-tags: "!latest"
+        dry-run: false
+
 
   security:
     needs: build
