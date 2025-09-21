@@ -29,7 +29,7 @@ func TestDefaultLogger(t *testing.T) {
 
 // MockLoggerForRun implements server.Logger for testing
 type MockLoggerForRun struct {
-	Messages []string
+	Messages   []string
 	shouldFail bool
 }
 
@@ -180,7 +180,7 @@ func TestMain(t *testing.T) {
 func TestMain_LoggerCoverage(t *testing.T) {
 	// We can't directly test main() but we can test the DefaultLogger
 	logger := DefaultLogger{}
-	
+
 	// Capture stdout temporarily
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -221,10 +221,10 @@ func TestMain_HealthCheckMode(t *testing.T) {
 
 // Helper function
 func contains(s, substr string) bool {
-	return len(substr) > 0 && len(s) >= len(substr) && 
-		(s == substr || s[:len(substr)] == substr || 
-		s[len(s)-len(substr):] == substr || 
-		len(s) > len(substr) && findSubstring(s, substr))
+	return len(substr) > 0 && len(s) >= len(substr) &&
+		(s == substr || s[:len(substr)] == substr ||
+			s[len(s)-len(substr):] == substr ||
+			len(s) > len(substr) && findSubstring(s, substr))
 }
 
 func findSubstring(s, substr string) bool {

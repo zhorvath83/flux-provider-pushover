@@ -78,7 +78,7 @@ func TestServer_Start_WithInvalidPort(t *testing.T) {
 	logger.mu.Lock()
 	messagesLen := len(logger.Messages)
 	logger.mu.Unlock()
-	
+
 	if messagesLen == 0 {
 		t.Error("Expected error message to be logged")
 	}
@@ -114,7 +114,7 @@ func TestServer_WaitForShutdown(t *testing.T) {
 		// We can't easily test signal handling, but we can test the shutdown flow
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		
+
 		err := srv.Shutdown(ctx)
 		if err != nil {
 			t.Logf("Shutdown error: %v", err)

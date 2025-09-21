@@ -32,45 +32,20 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-go-
 
-    - name: Test
+    - name: Run tests with shell script
+      env:
+        CI: true
       run: |
-        go test -v -race -coverprofile=coverage.out ./cmd/... ./internal/...
-        go test -bench=. -benchmem -run=^$ ./cmd/... ./internal/...
+        chmod +x scripts/runGoTests.sh
+        ./scripts/runGoTests.sh
 
-    - name: Check code formatting
-      run: |
-        if [ -n "$(gofmt -l cmd/ internal/)" ]; then
-          echo "Go code is not formatted:"
-          gofmt -d cmd/ internal/
-          exit 1
-        fi
-
-    - name: Vet
-      run: go vet ./cmd/... ./internal/...
-
-    - name: Generate coverage report
-      run: |
-        go tool cover -func=coverage.out -o=coverage.txt
-        COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}')
-        echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
-        echo "**Test Coverage: $COVERAGE**" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Coverage Details" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        go tool cover -func=coverage.out >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-
-    - name: Coverage Badge
-      run: |
-        COVERAGE_NUM=$(echo $COVERAGE | sed 's/%//')
-        if [ $(echo "$COVERAGE_NUM" | cut -d. -f1) -ge 80 ]; then
-          COLOR="brightgreen"
-        elif [ $(echo "$COVERAGE_NUM" | cut -d. -f1) -ge 60 ]; then
-          COLOR="yellow"  
-        else
-          COLOR="red"
-        fi
-        echo "Coverage: $COVERAGE (Color: $COLOR)" >> $GITHUB_STEP_SUMMARY
+    - name: Upload coverage to GitHub
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: coverage-report
+        path: coverage.out
+        retention-days: 7
 
   build:
     needs: test
