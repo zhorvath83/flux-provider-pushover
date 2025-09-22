@@ -17,7 +17,7 @@ A lightweight Go-based webhook bridge between FluxCD and Pushover notification s
 - Response time: <100ms for webhook processing
 - Throughput: 10,000+ RPS on a single instance
 - Binary size: ~7MB
-- Container size: ~10MB (scratch-based)
+- Container size: ~10MB (distroless based)
 
 ## Installation
 
@@ -202,7 +202,7 @@ go tool cover -html=coverage.out
 - **Filesystem**: Read-only root filesystem
 - **Network**: No outbound connections except to Pushover API
 - **Dependencies**: Zero external Go dependencies
-- **Base image**: Distroless/scratch for minimal attack surface
+- **Base image**: Distroless for minimal attack surface
 
 ## Monitoring
 
