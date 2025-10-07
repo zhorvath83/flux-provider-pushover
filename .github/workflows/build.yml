@@ -212,7 +212,7 @@ jobs:
     - name: Container Retention Policy
       if: github.event_name != 'pull_request'
       continue-on-error: true
-      uses: snok/container-retention-policy@v3.0.0
+      uses: snok/container-retention-policy@v3.0.1
       with:
         account: user
         token: ${{ secrets.PAT_4_PRUNE_GHCR }}
