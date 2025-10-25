@@ -38,7 +38,7 @@ jobs:
 
     - name: Upload gosec results as artifact
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: gosec-results
         path: gosec-results.sarif
@@ -133,7 +133,7 @@ jobs:
         fi
 
     - name: Upload coverage to GitHub
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: always()
       with:
         name: coverage-report
@@ -257,7 +257,7 @@ jobs:
 
     - name: Upload SARIF file as artifact
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: trivy-results
         path: trivy-results.sarif
