@@ -243,7 +243,7 @@ jobs:
         echo "Scanning image: $FIRST_TAG"
 
     - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@0.33.1
+      uses: aquasecurity/trivy-action@0.34.0
       with:
         image-ref: ${{ steps.image-tag.outputs.image-tag }}
         format: 'sarif'
