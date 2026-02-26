@@ -203,7 +203,7 @@ jobs:
     # Generate artifact attestations for the built images
     - name: Generate artifact attestation
       if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/')
-      uses: actions/attest-build-provenance@v3
+      uses: actions/attest-build-provenance@v4
       with:
         subject-path: |
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
