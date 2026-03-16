@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Final stage - distroless for minimal size with better compatibility
 # Using pinned version with SHA256 digest for reproducibility and Renovate support
 # renovate: datasource=docker depName=gcr.io/distroless/static
-FROM gcr.io/distroless/static:nonroot@sha256:f512d819b8f109f2375e8b51d8cfd8aafe81034bc3e319740128b7d7f70d5036
+FROM gcr.io/distroless/static:nonroot@sha256:e3f945647ffb95b5839c07038d64f9811adf17308b9121d8a2b87b6a22a80a39
 
 # Copy binary (distroless nonroot already runs as user 65532)
 COPY --from=builder /build/flux-provider-pushover /flux-provider-pushover
