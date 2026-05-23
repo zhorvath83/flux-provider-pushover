@@ -37,3 +37,6 @@ go.work.sum
 
 # Go test binaries
 *.test
+
+# macOS
+.DS_Store
