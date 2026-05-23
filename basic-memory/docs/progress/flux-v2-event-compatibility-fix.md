@@ -24,6 +24,8 @@ A HelmRelease események elutasítása (`json: unknown field "app-version"`) mia
 | `internal/handlers/message.go` | Map indexelés, `app-version` opcionális megjelenítés |
 | `internal/handlers/handlers_test.go` | Új tesztesetek, struct literálok frissítése |
 | `internal/handlers/message_test.go` | Új tesztesetek, struct literálok frissítése |
+| `internal/handlers/handlers.go` (utánkövető) | `json.Marshal` hiba kezelése (commit 8226672) |
+| `internal/types/types.go` (utánkövető) | Struct mezők igazítása `gofmt` ellenőrzéshez (commit 845e312) |
 
 ### Tesztek — Mind zöld
 
@@ -73,6 +75,8 @@ A HelmRelease események elutasítása (`json: unknown field "app-version"`) mia
 - [x] **JSON escaping az error response-ban**: `handlers.go:114` — `fmt.Sprintf` cserélve `json.Marshal`-ra (commit b9d6826)
 - [x] **Trailing newline javítás**: `handlers_test.go` és `message_test.go` utolsó sorához újsor hozzáadva (commit b9d6826)
 - [x] **Üres sor eltávolítása**: `handlers_test.go:30` üres sor törölve (commit b9d6826)
+- [x] **`json.Marshal` hibakezelése**: Pushover failure ágban a `marshalErr` ellenőrzése, fallback 500-as válasszal (commit 8226672 — utánkövető security fix)
+- [x] **`gofmt` struct alignment**: `FluxAlert`/`ObjectReference` mezők igazítása a `Metadata map[string]string` átállás után (commit 845e312)
 
 ### További javaslatok (nem a javítás része)
 
