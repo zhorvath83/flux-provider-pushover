@@ -12,14 +12,14 @@ type ObjectReference struct {
 
 // FluxAlert represents an alert from FluxCD
 type FluxAlert struct {
-	InvolvedObject      ObjectReference    `json:"involvedObject"`
-	Severity            string              `json:"severity"`
-	Timestamp           string              `json:"timestamp"`
-	Message             string              `json:"message"`
-	Reason              string              `json:"reason"`
-	Metadata            map[string]string   `json:"metadata,omitempty"`
-	ReportingController string              `json:"reportingController"`
-	ReportingInstance   string              `json:"reportingInstance,omitempty"`
+	InvolvedObject      ObjectReference   `json:"involvedObject"`
+	Severity            string            `json:"severity"`
+	Timestamp           string            `json:"timestamp"`
+	Message             string            `json:"message"`
+	Reason              string            `json:"reason"`
+	Metadata            map[string]string `json:"metadata,omitempty"`
+	ReportingController string            `json:"reportingController"`
+	ReportingInstance   string            `json:"reportingInstance,omitempty"`
 }
 
 // PushoverMessage represents a message to be sent to Pushover

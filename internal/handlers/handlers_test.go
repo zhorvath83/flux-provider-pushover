@@ -225,10 +225,10 @@ func TestCreateWebhookHandler_UnknownTopLevelField(t *testing.T) {
 
 	// Send a payload with an unknown top-level field to verify forward compatibility
 	body := map[string]interface{}{
-		"severity":  "error",
-		"message":   "Test",
-		"reason":    "TestReason",
-		"newField":  "someValue",
+		"severity": "error",
+		"message":  "Test",
+		"reason":   "TestReason",
+		"newField": "someValue",
 		"involvedObject": map[string]interface{}{
 			"kind": "Kustomization",
 			"name": "flux-system",
