@@ -110,10 +110,15 @@ func CreateWebhookHandler(deps *HandlerDependencies) http.HandlerFunc {
 
 		if err := deps.PushoverClient.SendMessage(ctx, pushoverMsg); err != nil {
 			deps.Logger.Printf("Failed to send to Pushover: %v", err)
-			errorResponse, _ := json.Marshal(map[string]string{
+			errorResponse, marshalErr := json.Marshal(map[string]string{
 				"error":   "Failed to send to Pushover",
 				"details": err.Error(),
 			})
+			if marshalErr != nil {
+				deps.Logger.Printf("Failed to marshal error response: %v", marshalErr)
+				writeJSONResponse(w, http.StatusInternalServerError, []byte(`{"error":"Internal server error"}`))
+				return
+			}
 			writeJSONResponse(w, http.StatusInternalServerError, errorResponse)
 			return
 		}
