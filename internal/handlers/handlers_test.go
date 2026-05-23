@@ -29,11 +29,6 @@ func (m *MockLogger) Println(v ...interface{}) {
 	m.messages = append(m.messages, "println")
 }
 
-// Helper function to check if string contains substring
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
-}
-
 // MockPushoverClient for testing
 type MockPushoverClient struct {
 	SendMessageFunc func(ctx context.Context, msg *types.PushoverMessage) error
@@ -134,6 +129,27 @@ func TestCreateWebhookHandler(t *testing.T) {
 			pushoverError:  fmt.Errorf("connection timeout"),
 			expectedStatus: http.StatusInternalServerError,
 		},
+		{
+			name:       "valid request with app-version metadata",
+			authHeader: "Bearer test_token",
+			body: types.FluxAlert{
+				Severity:            "error",
+				Message:             "Helm install failed",
+				Reason:              "InstallFailed",
+				ReportingController: "helm-controller",
+				InvolvedObject: types.ObjectReference{
+					Kind:      "HelmRelease",
+					Name:      "tuppr",
+					Namespace: "system-upgrade",
+				},
+				Metadata: map[string]string{
+					"revision":    "main@sha1:abc123",
+					"app-version": "0.1.35",
+				},
+			},
+			expectedStatus:   http.StatusOK,
+			expectedResponse: types.ResponseOK,
+		},
 	}
 
 	for _, tt := range tests {
@@ -188,6 +204,95 @@ func TestCreateWebhookHandler(t *testing.T) {
 				t.Errorf("Expected body %s, got %s", tt.expectedResponse, rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestCreateWebhookHandler_UnknownTopLevelField(t *testing.T) {
+	cfg := &config.Config{
+		PushoverAPIToken: "test_api_token",
+		PushoverUserKey:  "test_user",
+		BearerToken:      "Bearer test_api_token",
+	}
+
+	deps := &HandlerDependencies{
+		Config:         cfg,
+		PushoverClient: &MockPushoverClient{},
+		Logger:         &MockLogger{},
+		MessageBuilder: BuildPushoverMessage,
+	}
+
+	handler := CreateWebhookHandler(deps)
+
+	// Send a payload with an unknown top-level field to verify forward compatibility
+	body := map[string]interface{}{
+		"severity":  "error",
+		"message":   "Test",
+		"reason":    "TestReason",
+		"newField":  "someValue",
+		"involvedObject": map[string]interface{}{
+			"kind": "Kustomization",
+			"name": "flux-system",
+		},
+		"metadata": map[string]interface{}{
+			"revision": "main@sha1:abc",
+		},
+	}
+
+	bodyBytes, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Authorization", "Bearer test_api_token")
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status %d for payload with unknown top-level field, got %d", http.StatusOK, rr.Code)
+	}
+}
+
+func TestCreateWebhookHandler_MetadataWithMultipleKeys(t *testing.T) {
+	cfg := &config.Config{
+		PushoverAPIToken: "test_api_token",
+		PushoverUserKey:  "test_user",
+		BearerToken:      "Bearer test_api_token",
+	}
+
+	deps := &HandlerDependencies{
+		Config:         cfg,
+		PushoverClient: &MockPushoverClient{},
+		Logger:         &MockLogger{},
+		MessageBuilder: BuildPushoverMessage,
+	}
+
+	handler := CreateWebhookHandler(deps)
+
+	body := types.FluxAlert{
+		Severity:            "error",
+		Message:             "Test",
+		Reason:              "TestReason",
+		ReportingController: "kustomize-controller",
+		InvolvedObject: types.ObjectReference{
+			Kind: "Kustomization",
+			Name: "flux-system",
+		},
+		Metadata: map[string]string{
+			"revision":      "main@sha1:abc",
+			"commit_status": "success",
+			"summary":       "test summary",
+		},
+	}
+
+	bodyBytes, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Authorization", "Bearer test_api_token")
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status %d for payload with multiple metadata keys, got %d", http.StatusOK, rr.Code)
 	}
 }
 

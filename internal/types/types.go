@@ -1,26 +1,25 @@
 package types
 
+// ObjectReference represents a Kubernetes object reference
+type ObjectReference struct {
+	Kind            string `json:"kind"`
+	Namespace       string `json:"namespace"`
+	Name            string `json:"name"`
+	UID             string `json:"uid"`
+	APIVersion      string `json:"apiVersion"`
+	ResourceVersion string `json:"resourceVersion"`
+}
+
 // FluxAlert represents an alert from FluxCD
 type FluxAlert struct {
-	InvolvedObject struct {
-		Kind            string `json:"kind"`
-		Namespace       string `json:"namespace"`
-		Name            string `json:"name"`
-		UID             string `json:"uid"`
-		APIVersion      string `json:"apiVersion"`
-		ResourceVersion string `json:"resourceVersion"`
-	} `json:"involvedObject"`
-	Severity  string `json:"severity"`
-	Timestamp string `json:"timestamp"`
-	Message   string `json:"message"`
-	Reason    string `json:"reason"`
-	Metadata  struct {
-		CommitStatus string `json:"commit_status"`
-		Revision     string `json:"revision"`
-		Summary      string `json:"summary"`
-	} `json:"metadata"`
-	ReportingController string `json:"reportingController"`
-	ReportingInstance   string `json:"reportingInstance"`
+	InvolvedObject      ObjectReference    `json:"involvedObject"`
+	Severity            string              `json:"severity"`
+	Timestamp           string              `json:"timestamp"`
+	Message             string              `json:"message"`
+	Reason              string              `json:"reason"`
+	Metadata            map[string]string   `json:"metadata,omitempty"`
+	ReportingController string              `json:"reportingController"`
+	ReportingInstance   string              `json:"reportingInstance,omitempty"`
 }
 
 // PushoverMessage represents a message to be sent to Pushover

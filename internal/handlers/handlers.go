@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -80,7 +79,6 @@ func CreateWebhookHandler(deps *HandlerDependencies) http.HandlerFunc {
 		// Parse JSON payload
 		var alert types.FluxAlert
 		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
 
 		if err := decoder.Decode(&alert); err != nil {
 			deps.Logger.Printf("Failed to parse JSON: %v", err)
@@ -112,8 +110,11 @@ func CreateWebhookHandler(deps *HandlerDependencies) http.HandlerFunc {
 
 		if err := deps.PushoverClient.SendMessage(ctx, pushoverMsg); err != nil {
 			deps.Logger.Printf("Failed to send to Pushover: %v", err)
-			errorResponse := fmt.Sprintf(`{"error": "Failed to send to Pushover", "details": "%s"}`, err.Error())
-			writeJSONResponse(w, http.StatusInternalServerError, []byte(errorResponse))
+			errorResponse, _ := json.Marshal(map[string]string{
+				"error":   "Failed to send to Pushover",
+				"details": err.Error(),
+			})
+			writeJSONResponse(w, http.StatusInternalServerError, errorResponse)
 			return
 		}
 

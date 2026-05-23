@@ -16,13 +16,18 @@ func BuildPushoverMessage(alert *types.FluxAlert) string {
 	severity := normalizeString(alert.Severity, types.DefaultSeverity, strings.ToUpper)
 	reason := defaultIfEmpty(alert.Reason, types.DefaultValue)
 	controller := defaultIfEmpty(alert.ReportingController, types.DefaultValue)
-	revision := defaultIfEmpty(alert.Metadata.Revision, types.DefaultValue)
+	revision := defaultIfEmpty(alert.Metadata["revision"], types.DefaultValue)
 	kind := normalizeString(alert.InvolvedObject.Kind, types.DefaultValue, strings.ToLower)
 	objectName := defaultIfEmpty(alert.InvolvedObject.Name, types.DefaultValue)
 	message := defaultIfEmpty(alert.Message, types.NoMessage)
 
+	revisionLine := revision
+	if appVersion, ok := alert.Metadata["app-version"]; ok && appVersion != "" {
+		revisionLine = fmt.Sprintf("%s (app: %s)", revision, appVersion)
+	}
+
 	return fmt.Sprintf("%s [%s]\n%s\n\nController: %s\nObject: %s/%s\nRevision: %s\n",
-		reason, severity, message, controller, kind, objectName, revision)
+		reason, severity, message, controller, kind, objectName, revisionLine)
 }
 
 // defaultIfEmpty returns default value if string is empty (pure function)
@@ -66,7 +71,7 @@ func ExtractAlertInfo(alert *types.FluxAlert) map[string]string {
 		"severity":   defaultIfEmpty(alert.Severity, types.DefaultSeverity),
 		"reason":     defaultIfEmpty(alert.Reason, types.DefaultValue),
 		"controller": defaultIfEmpty(alert.ReportingController, types.DefaultValue),
-		"revision":   defaultIfEmpty(alert.Metadata.Revision, types.DefaultValue),
+		"revision":   defaultIfEmpty(alert.Metadata["revision"], types.DefaultValue),
 		"kind":       defaultIfEmpty(alert.InvolvedObject.Kind, types.DefaultValue),
 		"name":       defaultIfEmpty(alert.InvolvedObject.Name, types.DefaultValue),
 		"namespace":  defaultIfEmpty(alert.InvolvedObject.Namespace, "default"),

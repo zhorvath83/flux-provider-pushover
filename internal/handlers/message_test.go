@@ -21,23 +21,12 @@ func TestBuildPushoverMessage(t *testing.T) {
 				Message:             "Test message",
 				Reason:              "TestReason",
 				ReportingController: "test-controller",
-				InvolvedObject: struct {
-					Kind            string `json:"kind"`
-					Namespace       string `json:"namespace"`
-					Name            string `json:"name"`
-					UID             string `json:"uid"`
-					APIVersion      string `json:"apiVersion"`
-					ResourceVersion string `json:"resourceVersion"`
-				}{
+				InvolvedObject: types.ObjectReference{
 					Kind: "Deployment",
 					Name: "test-deployment",
 				},
-				Metadata: struct {
-					CommitStatus string `json:"commit_status"`
-					Revision     string `json:"revision"`
-					Summary      string `json:"summary"`
-				}{
-					Revision: "abc123",
+				Metadata: map[string]string{
+					"revision": "abc123",
 				},
 			},
 			expected: "TestReason [ERROR]\nTest message\n\nController: test-controller\nObject: deployment/test-deployment\nRevision: abc123\n",
@@ -54,6 +43,62 @@ func TestBuildPushoverMessage(t *testing.T) {
 				Message:  "Partial message",
 			},
 			expected: "Unknown [WARNING]\nPartial message\n\nController: Unknown\nObject: unknown/Unknown\nRevision: Unknown\n",
+		},
+		{
+			name: "alert with app-version in metadata",
+			alert: &types.FluxAlert{
+				Severity:            "error",
+				Message:             "Helm install failed",
+				Reason:              "InstallFailed",
+				ReportingController: "helm-controller",
+				InvolvedObject: types.ObjectReference{
+					Kind:      "HelmRelease",
+					Name:      "tuppr",
+					Namespace: "system-upgrade",
+				},
+				Metadata: map[string]string{
+					"revision":    "main@sha1:abc123",
+					"app-version": "0.1.35",
+				},
+			},
+			expected: "InstallFailed [ERROR]\nHelm install failed\n\nController: helm-controller\nObject: helmrelease/tuppr\nRevision: main@sha1:abc123 (app: 0.1.35)\n",
+		},
+		{
+			name: "alert with app-version empty string",
+			alert: &types.FluxAlert{
+				Severity: "info",
+				Message:  "Deployed",
+				Reason:   "TestReason",
+				InvolvedObject: types.ObjectReference{
+					Kind: "HelmRelease",
+					Name: "my-release",
+				},
+				Metadata: map[string]string{
+					"revision":    "abc123",
+					"app-version": "",
+				},
+			},
+			expected: "TestReason [INFO]\nDeployed\n\nController: Unknown\nObject: helmrelease/my-release\nRevision: abc123\n",
+		},
+		{
+			name: "alert with multiple metadata keys",
+			alert: &types.FluxAlert{
+				Severity:            "error",
+				Message:             "Test message",
+				Reason:              "TestReason",
+				ReportingController: "test-controller",
+				InvolvedObject: types.ObjectReference{
+					Kind: "Deployment",
+					Name: "test-deployment",
+				},
+				Metadata: map[string]string{
+					"revision":      "abc123",
+					"commit_status": "success",
+					"summary":       "test summary",
+					"app-version":   "1.0.0",
+				},
+			},
+			expected: "TestReason [ERROR]\nTest message\n\nController: test-controller\nObject: deployment/test-deployment\nRevision: abc123 (app: 1.0.0)\n",
 		},
 	}
 
@@ -196,24 +241,13 @@ func TestExtractAlertInfo(t *testing.T) {
 		Message:             "Test message",
 		Reason:              "TestReason",
 		ReportingController: "test-controller",
-		InvolvedObject: struct {
-			Kind            string `json:"kind"`
-			Namespace       string `json:"namespace"`
-			Name            string `json:"name"`
-			UID             string `json:"uid"`
-			APIVersion      string `json:"apiVersion"`
-			ResourceVersion string `json:"resourceVersion"`
-		}{
+		InvolvedObject: types.ObjectReference{
 			Kind:      "Deployment",
 			Name:      "test-deployment",
 			Namespace: "test-namespace",
 		},
-		Metadata: struct {
-			CommitStatus string `json:"commit_status"`
-			Revision     string `json:"revision"`
-			Summary      string `json:"summary"`
-		}{
-			Revision: "abc123",
+		Metadata: map[string]string{
+			"revision": "abc123",
 		},
 	}
 
@@ -267,6 +301,87 @@ func TestExtractAlertInfo_EmptyAlert(t *testing.T) {
 	}
 }
 
+func TestExtractAlertInfo_MetadataMap(t *testing.T) {
+	alert := &types.FluxAlert{
+		Severity:            "error",
+		Message:             "Test message",
+		Reason:              "TestReason",
+		ReportingController: "helm-controller",
+		InvolvedObject: types.ObjectReference{
+			Kind:      "HelmRelease",
+			Name:      "tuppr",
+			Namespace: "system-upgrade",
+		},
+		Metadata: map[string]string{
+			"revision":      "main@sha1:abc123",
+			"app-version":   "0.1.35",
+			"commit_status": "success",
+			"summary":       "test summary",
+		},
+	}
+
+	info := ExtractAlertInfo(alert)
+
+	tests := []struct {
+		key      string
+		expected string
+	}{
+		{"revision", "main@sha1:abc123"},
+		{"severity", "error"},
+		{"controller", "helm-controller"},
+		{"kind", "HelmRelease"},
+		{"name", "tuppr"},
+		{"namespace", "system-upgrade"},
+	}
+
+	for _, tt := range tests {
+		if info[tt.key] != tt.expected {
+			t.Errorf("ExtractAlertInfo()[%s] = %s, want %s",
+				tt.key, info[tt.key], tt.expected)
+		}
+	}
+}
+
+func TestBuildPushoverMessage_NilMetadata(t *testing.T) {
+	alert := &types.FluxAlert{
+		Severity:            "info",
+		Message:             "Reconciliation succeeded",
+		Reason:              "ReconciliationSucceeded",
+		ReportingController: "kustomize-controller",
+		InvolvedObject: types.ObjectReference{
+			Kind: "Kustomization",
+			Name: "flux-system",
+		},
+		Metadata: nil,
+	}
+
+	result := BuildPushoverMessage(alert)
+	expected := "ReconciliationSucceeded [INFO]\nReconciliation succeeded\n\nController: kustomize-controller\nObject: kustomization/flux-system\nRevision: Unknown\n"
+
+	if result != expected {
+		t.Errorf("BuildPushoverMessage with nil Metadata:\nExpected:\n%s\nGot:\n%s", expected, result)
+	}
+}
+
+func TestExtractAlertInfo_NilMetadata(t *testing.T) {
+	alert := &types.FluxAlert{
+		Severity:            "info",
+		Reason:              "ReconciliationSucceeded",
+		ReportingController: "kustomize-controller",
+		InvolvedObject: types.ObjectReference{
+			Kind: "Kustomization",
+			Name: "flux-system",
+		},
+		Metadata: nil,
+	}
+
+	info := ExtractAlertInfo(alert)
+
+	if info["revision"] != types.DefaultValue {
+		t.Errorf("Expected revision=%s for nil Metadata, got %s", types.DefaultValue, info["revision"])
+	}
+}
+
 // Benchmark tests
 func BenchmarkBuildPushoverMessage(b *testing.B) {
 	alert := &types.FluxAlert{
@@ -274,23 +389,12 @@ func BenchmarkBuildPushoverMessage(b *testing.B) {
 		Message:             "Benchmark test message",
 		Reason:              "BenchmarkReason",
 		ReportingController: "benchmark-controller",
-		InvolvedObject: struct {
-			Kind            string `json:"kind"`
-			Namespace       string `json:"namespace"`
-			Name            string `json:"name"`
-			UID             string `json:"uid"`
-			APIVersion      string `json:"apiVersion"`
-			ResourceVersion string `json:"resourceVersion"`
-		}{
+		InvolvedObject: types.ObjectReference{
 			Kind: "Deployment",
 			Name: "benchmark-deployment",
 		},
-		Metadata: struct {
-			CommitStatus string `json:"commit_status"`
-			Revision     string `json:"revision"`
-			Summary      string `json:"summary"`
-		}{
-			Revision: "abc123def456",
+		Metadata: map[string]string{
+			"revision": "abc123def456",
 		},
 	}
 
