@@ -205,8 +205,8 @@ jobs:
       if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/')
       uses: actions/attest-build-provenance@v4
       with:
-        subject-path: |
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+        subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        subject-digest: ${{ steps.build.outputs.digest }}
         push-to-registry: true
 
     - name: Container Retention Policy
