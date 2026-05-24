@@ -129,7 +129,7 @@ func HealthCheck(url string) error {
 	}
 	defer resp.Body.Close()
 
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body) //gosec:disable G104 -- discard read, error irrelevant
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("health check returned status %d", resp.StatusCode)
@@ -147,5 +147,5 @@ var healthCheckClient = &http.Client{
 func writeJSONResponse(w http.ResponseWriter, statusCode int, body []byte) {
 	w.Header().Set("Content-Type", types.ContentTypeJSON)
 	w.WriteHeader(statusCode)
-	w.Write(body)
+	_, _ = w.Write(body) //gosec:disable G104 -- response writer, error not actionable
 }

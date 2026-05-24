@@ -2,11 +2,12 @@ package pushover
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"math"
-	"math/rand"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -113,11 +114,12 @@ func (p *PushoverClient) doSend(ctx context.Context, data url.Values) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body) //gosec:disable G104 -- discard read, error irrelevant
 		return nil
 	}
 
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	body, errRead := io.ReadAll(io.LimitReader(resp.Body, 512))
+	_ = errRead // error not actionable; body may still contain useful data
 
 	if isRetryableStatus(resp.StatusCode) {
 		return &retryableError{status: resp.StatusCode, body: string(body)}
@@ -132,7 +134,12 @@ func (p *PushoverClient) backoffDelay(attempt int) time.Duration {
 		delay = float64(p.retryCfg.MaxDelay)
 	}
 	// Subtract up to 50% random jitter to avoid thundering herd on retries.
-	jitter := delay * 0.5 * rand.Float64()
+	jitterN, err := rand.Int(rand.Reader, big.NewInt(1e6))
+	if err != nil {
+		// crypto/rand failure is extraordinary; fall back to zero jitter
+		jitterN = big.NewInt(0)
+	}
+	jitter := delay * 0.5 * float64(jitterN.Int64()) / 1e6
 	delay = delay - jitter
 	return time.Duration(delay)
 }

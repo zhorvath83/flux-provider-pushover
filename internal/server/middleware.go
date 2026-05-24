@@ -30,7 +30,12 @@ func RequestIDFromContext(ctx context.Context) string {
 // generateRequestID creates a 20-character base32 request ID using crypto/rand.
 func generateRequestID() string {
 	b := make([]byte, 13) // 13 bytes → 21 base32 chars, we take 20
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failure is extraordinary; use deterministic fallback
+		for i := range b {
+			b[i] = byte(i)
+		}
+	}
 	encoding := base32.StdEncoding.WithPadding(base32.NoPadding)
 	return strings.ToLower(encoding.EncodeToString(b)[:20])
 }
