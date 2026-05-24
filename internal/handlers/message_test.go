@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/zhorvath83/flux-provider-pushover/internal/config"
 	"github.com/zhorvath83/flux-provider-pushover/internal/types"
@@ -401,5 +403,114 @@ func BenchmarkBuildPushoverMessage(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = BuildPushoverMessage(alert)
+	}
+}
+
+func TestCreatePushoverMessage_Truncation(t *testing.T) {
+	cfg := &config.Config{
+		PushoverAPIToken: "test_token",
+		PushoverUserKey:  "test_user",
+	}
+
+	longMsg := strings.Repeat("x", 2000)
+	result := CreatePushoverMessage(cfg, longMsg)
+
+	if utf8.RuneCountInString(result.Message) > PushoverMessageLimit {
+		t.Errorf("Message not truncated: got %d runes, max %d", utf8.RuneCountInString(result.Message), PushoverMessageLimit)
+	}
+	if !strings.HasSuffix(result.Message, "...") {
+		t.Error("Truncated message should end with ...")
+	}
+}
+
+func TestValidateAlert_FieldLengths(t *testing.T) {
+	tests := []struct {
+		name      string
+		alert     *types.FluxAlert
+		wantError bool
+	}{
+		{
+			name: "message too long",
+			alert: &types.FluxAlert{
+				Message: strings.Repeat("x", MaxMessageFieldLen+1),
+			},
+			wantError: true,
+		},
+		{
+			name: "name too long",
+			alert: &types.FluxAlert{
+				InvolvedObject: types.ObjectReference{
+					Name: strings.Repeat("x", MaxStringFieldLen+1),
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "too many metadata entries",
+			alert: &types.FluxAlert{
+				Metadata: func() map[string]string {
+					m := make(map[string]string)
+					for i := 0; i < MaxMetadataEntries+1; i++ {
+						m[fmt.Sprintf("key%d", i)] = "val"
+					}
+					return m
+				}(),
+			},
+			wantError: true,
+		},
+		{
+			name: "metadata key too long",
+			alert: &types.FluxAlert{
+				Metadata: map[string]string{
+					strings.Repeat("k", MaxMetadataKeyLen+1): "value",
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "valid within limits",
+			alert: &types.FluxAlert{
+				Message: strings.Repeat("x", MaxMessageFieldLen),
+				InvolvedObject: types.ObjectReference{
+					Name: strings.Repeat("n", MaxStringFieldLen),
+				},
+			},
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateAlert(tt.alert)
+			if (err != nil) != tt.wantError {
+				t.Errorf("ValidateAlert() error = %v, wantError %v", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestValidateAlert_RuneBasedLength(t *testing.T) {
+	// Multi-byte UTF-8: 2-byte runes (Hungarian accents)
+	longName := strings.Repeat("á", MaxStringFieldLen+1) // 513 runes, 1026 bytes
+	alert := &types.FluxAlert{
+		InvolvedObject: types.ObjectReference{
+			Name: longName,
+		},
+	}
+	err := ValidateAlert(alert)
+	if err == nil {
+		t.Error("Expected error for name exceeding rune limit")
+	}
+
+	// Exactly 512 runes should pass even though bytes > 512
+	validName := strings.Repeat("á", MaxStringFieldLen) // 512 runes, 1024 bytes
+	alert = &types.FluxAlert{
+		InvolvedObject: types.ObjectReference{
+			Name: validName,
+		},
+	}
+	err = ValidateAlert(alert)
+	if err != nil {
+		t.Errorf("Expected valid for 512 runes, got: %v", err)
 	}
 }

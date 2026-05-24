@@ -48,6 +48,7 @@ const (
 	WriteTimeout    = 10      // seconds
 	ShutdownTimeout = 30      // seconds
 	MaxBodySize     = 1 << 20 // 1MB
+	MaxHeaderSize   = 1 << 13 // 8KB
 )
 
 // Pre-defined JSON responses
@@ -56,6 +57,7 @@ var (
 	ResponseUnauthorized     = []byte(`{"error": "Unauthorized"}`)
 	ResponseInvalidJSON      = []byte(`{"error": "Invalid JSON"}`)
 	ResponseMethodNotAllowed = []byte(`{"error": "Method not allowed"}`)
+	ResponseUpstreamError    = []byte(`{"error": "Upstream service unavailable"}`)
 	ResponseRootError        = []byte("Requests need to be made to /webhook")
 	ResponseHealthy          = []byte("healthy")
 )

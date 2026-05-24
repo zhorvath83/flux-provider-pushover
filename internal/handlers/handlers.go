@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -30,8 +31,6 @@ func CreateRootHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		if _, err := w.Write(types.ResponseRootError); err != nil {
-			// Response header already written, can't do much more
-			// This error is logged by the HTTP server itself
 			return
 		}
 	}
@@ -42,8 +41,6 @@ func CreateHealthHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		if _, err := w.Write(types.ResponseHealthy); err != nil {
-			// Response header already written, can't do much more
-			// This error is logged by the HTTP server itself
 			return
 		}
 	}
@@ -52,80 +49,60 @@ func CreateHealthHandler() http.HandlerFunc {
 // CreateWebhookHandler creates a webhook handler with dependencies
 func CreateWebhookHandler(deps *HandlerDependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Handle OPTIONS requests for CORS
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
+		requestID := server.RequestIDFromContext(r.Context())
+		log := deps.Logger.With("request_id", requestID)
 
-		// Only accept POST requests
 		if r.Method != http.MethodPost {
-			deps.Logger.Printf("Invalid method %s from %s", r.Method, r.RemoteAddr)
+			log.Warn("invalid method", "method", r.Method, "remote_addr", r.RemoteAddr)
 			writeJSONResponse(w, http.StatusMethodNotAllowed, types.ResponseMethodNotAllowed)
 			return
 		}
 
-		// Check authorization
-		if r.Header.Get("Authorization") != deps.Config.BearerToken {
-			deps.Logger.Printf("Unauthorized request from %s", r.RemoteAddr)
+		// Check authorization (constant-time comparison to prevent timing attacks)
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(deps.Config.BearerToken)) != 1 {
+			log.Warn("unauthorized request", "remote_addr", r.RemoteAddr)
 			writeJSONResponse(w, http.StatusUnauthorized, types.ResponseUnauthorized)
 			return
 		}
 
-		// Limit request body size
 		r.Body = http.MaxBytesReader(w, r.Body, types.MaxBodySize)
 		defer r.Body.Close()
 
-		// Parse JSON payload
 		var alert types.FluxAlert
 		decoder := json.NewDecoder(r.Body)
 
 		if err := decoder.Decode(&alert); err != nil {
-			deps.Logger.Printf("Failed to parse JSON: %v", err)
+			log.Warn("failed to parse JSON", "error", err)
 			writeJSONResponse(w, http.StatusBadRequest, types.ResponseInvalidJSON)
 			return
 		}
 
-		// Validate alert
 		if err := ValidateAlert(&alert); err != nil {
-			deps.Logger.Printf("Invalid alert: %v", err)
+			log.Warn("invalid alert", "error", err)
 			writeJSONResponse(w, http.StatusBadRequest, types.ResponseInvalidJSON)
 			return
 		}
 
-		// Build message
 		message := deps.MessageBuilder(&alert)
 
-		// Special handling for test mode
 		if deps.Config.PushoverAPIToken == "test_api_token" {
-			deps.Logger.Println("Test mode: not sending to Pushover")
+			log.Info("test mode: skipping Pushover send")
 			writeJSONResponse(w, http.StatusOK, types.ResponseOK)
 			return
 		}
 
-		// Create and send Pushover message
 		pushoverMsg := CreatePushoverMessage(deps.Config, message)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
 		if err := deps.PushoverClient.SendMessage(ctx, pushoverMsg); err != nil {
-			deps.Logger.Printf("Failed to send to Pushover: %v", err)
-			errorResponse, marshalErr := json.Marshal(map[string]string{
-				"error":   "Failed to send to Pushover",
-				"details": err.Error(),
-			})
-			if marshalErr != nil {
-				deps.Logger.Printf("Failed to marshal error response: %v", marshalErr)
-				writeJSONResponse(w, http.StatusInternalServerError, []byte(`{"error":"Internal server error"}`))
-				return
-			}
-			writeJSONResponse(w, http.StatusInternalServerError, errorResponse)
+			log.Error("failed to send to Pushover", "error", err)
+			writeJSONResponse(w, http.StatusBadGateway, types.ResponseUpstreamError)
 			return
 		}
 
-		// Log success
 		info := ExtractAlertInfo(&alert)
-		deps.Logger.Printf("Successfully sent alert to Pushover for %s/%s", info["kind"], info["name"])
+		log.Info("alert sent to Pushover", "kind", info["kind"], "name", info["name"])
 		writeJSONResponse(w, http.StatusOK, types.ResponseOK)
 	}
 }
@@ -135,8 +112,6 @@ func writeJSONResponse(w http.ResponseWriter, statusCode int, body []byte) {
 	w.Header().Set("Content-Type", types.ContentTypeJSON)
 	w.WriteHeader(statusCode)
 	if _, err := w.Write(body); err != nil {
-		// Response header already written, can't do much more
-		// This error is logged by the HTTP server itself
 		return
 	}
 }
@@ -152,13 +127,9 @@ func CreateRouter(deps *HandlerDependencies) http.Handler {
 
 // CreateServerDependencies creates all server dependencies
 func CreateServerDependencies(cfg *config.Config, logger server.Logger) (*HandlerDependencies, error) {
-	// Create HTTP client
 	httpClient := pushover.CreateOptimizedHTTPClient(10 * time.Second)
-
-	// Create Pushover client
 	pushoverClient := pushover.NewPushoverClient(httpClient, cfg.PushoverURL)
 
-	// Create dependencies
 	deps := &HandlerDependencies{
 		Config:         cfg,
 		PushoverClient: pushoverClient,

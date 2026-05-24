@@ -3,9 +3,19 @@ package handlers
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/zhorvath83/flux-provider-pushover/internal/config"
 	"github.com/zhorvath83/flux-provider-pushover/internal/types"
+)
+
+const (
+	MaxStringFieldLen    = 512
+	MaxMessageFieldLen   = 4096
+	MaxMetadataKeyLen    = 128
+	MaxMetadataValueLen  = 1024
+	MaxMetadataEntries   = 32
+	PushoverMessageLimit = 1024
 )
 
 // MessageBuilder is a functional type for building messages
@@ -46,8 +56,12 @@ func normalizeString(value, defaultValue string, transform func(string) string) 
 	return transform(value)
 }
 
-// CreatePushoverMessage creates a PushoverMessage struct (pure function)
+// CreatePushoverMessage creates a PushoverMessage struct, truncating message to Pushover limit
 func CreatePushoverMessage(cfg *config.Config, message string) *types.PushoverMessage {
+	if utf8.RuneCountInString(message) > PushoverMessageLimit {
+		runes := []rune(message)
+		message = string(runes[:PushoverMessageLimit-3]) + "..."
+	}
 	return &types.PushoverMessage{
 		Token:   cfg.PushoverAPIToken,
 		User:    cfg.PushoverUserKey,
@@ -56,12 +70,53 @@ func CreatePushoverMessage(cfg *config.Config, message string) *types.PushoverMe
 	}
 }
 
-// ValidateAlert validates a FluxAlert (pure function)
+// ValidateAlert validates a FluxAlert with per-field length limits
 func ValidateAlert(alert *types.FluxAlert) error {
 	if alert == nil {
 		return fmt.Errorf("alert is nil")
 	}
-	// Add more validation if needed
+
+	if err := validateFieldLen("message", alert.Message, MaxMessageFieldLen); err != nil {
+		return err
+	}
+	if err := validateFieldLen("reason", alert.Reason, MaxStringFieldLen); err != nil {
+		return err
+	}
+	if err := validateFieldLen("severity", alert.Severity, MaxStringFieldLen); err != nil {
+		return err
+	}
+	if err := validateFieldLen("reportingController", alert.ReportingController, MaxStringFieldLen); err != nil {
+		return err
+	}
+	if err := validateFieldLen("kind", alert.InvolvedObject.Kind, MaxStringFieldLen); err != nil {
+		return err
+	}
+	if err := validateFieldLen("name", alert.InvolvedObject.Name, MaxStringFieldLen); err != nil {
+		return err
+	}
+	if err := validateFieldLen("namespace", alert.InvolvedObject.Namespace, MaxStringFieldLen); err != nil {
+		return err
+	}
+
+	if len(alert.Metadata) > MaxMetadataEntries {
+		return fmt.Errorf("metadata has too many entries: %d (max %d)", len(alert.Metadata), MaxMetadataEntries)
+	}
+	for k, v := range alert.Metadata {
+		if err := validateFieldLen("metadata key", k, MaxMetadataKeyLen); err != nil {
+			return err
+		}
+		if err := validateFieldLen("metadata value", v, MaxMetadataValueLen); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateFieldLen(name, value string, max int) error {
+	if utf8.RuneCountInString(value) > max {
+		return fmt.Errorf("%s exceeds maximum length: %d (max %d)", name, utf8.RuneCountInString(value), max)
+	}
 	return nil
 }
 

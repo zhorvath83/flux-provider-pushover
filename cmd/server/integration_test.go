@@ -18,8 +18,10 @@ type MockLogger struct {
 	Messages []string
 }
 
-func (m *MockLogger) Printf(format string, v ...interface{}) {}
-func (m *MockLogger) Println(v ...interface{})               {}
+func (m *MockLogger) Info(msg string, args ...any)  {}
+func (m *MockLogger) Warn(msg string, args ...any)  {}
+func (m *MockLogger) Error(msg string, args ...any) {}
+func (m *MockLogger) With(args ...any) server.Logger { return m }
 
 // MockPushoverClient for testing
 type MockPushoverClient struct {
@@ -33,7 +35,6 @@ func (m *MockPushoverClient) SendMessage(ctx context.Context, msg *types.Pushove
 	return nil
 }
 
-// TestCreateWebhookHandler_FullCoverage adds missing test cases
 func TestCreateWebhookHandler_FullCoverage(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -50,7 +51,7 @@ func TestCreateWebhookHandler_FullCoverage(t *testing.T) {
 			authHeader:     "",
 			body:           "",
 			testMode:       false,
-			expectedStatus: http.StatusOK,
+			expectedStatus: http.StatusMethodNotAllowed,
 		},
 		{
 			name:           "GET request",
@@ -115,12 +116,7 @@ func TestCreateWebhookHandler_FullCoverage(t *testing.T) {
 	}
 }
 
-// TestMain_Coverage provides coverage for the main function
 func TestMain_Coverage(t *testing.T) {
-	// Since main() uses os.Exit, we can't test it directly
-	// We test the logic by verifying components work correctly
-
-	// Test health check path
 	if len(os.Args) < 2 {
 		os.Args = append(os.Args, "")
 	}
@@ -128,7 +124,6 @@ func TestMain_Coverage(t *testing.T) {
 	oldArgs := os.Args
 	defer func() { os.Args = oldArgs }()
 
-	// Test health check error path
 	os.Args[1] = "-health"
 	err := server.HealthCheck("http://invalid-url:99999/health")
 	if err == nil {

@@ -19,16 +19,26 @@ type MockLogger struct {
 	Messages []string
 }
 
-func (m *MockLogger) Printf(format string, v ...interface{}) {
+func (m *MockLogger) Info(msg string, args ...any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Messages = append(m.Messages, fmt.Sprintf(format, v...))
+	m.Messages = append(m.Messages, msg)
 }
 
-func (m *MockLogger) Println(v ...interface{}) {
+func (m *MockLogger) Warn(msg string, args ...any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Messages = append(m.Messages, fmt.Sprint(v...))
+	m.Messages = append(m.Messages, msg)
+}
+
+func (m *MockLogger) Error(msg string, args ...any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Messages = append(m.Messages, msg)
+}
+
+func (m *MockLogger) With(args ...any) Logger {
+	return m
 }
 
 func TestNewServer(t *testing.T) {
@@ -58,9 +68,9 @@ func TestNewServer(t *testing.T) {
 			time.Duration(types.WriteTimeout)*time.Second, server.httpServer.WriteTimeout)
 	}
 
-	if server.httpServer.MaxHeaderBytes != types.MaxBodySize {
+	if server.httpServer.MaxHeaderBytes != types.MaxHeaderSize {
 		t.Errorf("Expected MaxHeaderBytes %d, got %d",
-			types.MaxBodySize, server.httpServer.MaxHeaderBytes)
+			types.MaxHeaderSize, server.httpServer.MaxHeaderBytes)
 	}
 
 	if server.logger != logger {
@@ -70,7 +80,7 @@ func TestNewServer(t *testing.T) {
 
 func TestServer_StartAndShutdown(t *testing.T) {
 	cfg := &config.Config{
-		Port: ":0", // Random port
+		Port: ":0",
 	}
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -82,11 +92,9 @@ func TestServer_StartAndShutdown(t *testing.T) {
 
 	server := NewServer(cfg, handler, logger)
 
-	// Replace the ListenAndServe with a test server
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
 
-	// Test shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -97,10 +105,8 @@ func TestServer_StartAndShutdown(t *testing.T) {
 }
 
 func TestServer_WaitForShutdown_Timeout(t *testing.T) {
-	// This test verifies the shutdown timeout behavior
 	cfg := &config.Config{Port: ":0"}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate long-running request
 		time.Sleep(100 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	})
@@ -108,20 +114,67 @@ func TestServer_WaitForShutdown_Timeout(t *testing.T) {
 	logger := &MockLogger{}
 	server := NewServer(cfg, handler, logger)
 
-	// Create a context that times out quickly
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	// This should timeout
 	err := server.Shutdown(ctx)
 	if err == nil {
-		// In this case, no connections are active so it might not timeout
 		t.Log("Server shutdown completed without timeout")
 	} else if err.Error() != "server forced to shutdown: "+context.DeadlineExceeded.Error() {
-		// Check if we get the expected wrapped error
 		expectedErr := fmt.Errorf("server forced to shutdown: %w", context.DeadlineExceeded)
 		if err.Error() != expectedErr.Error() {
 			t.Logf("Expected error '%v', got '%v'", expectedErr, err)
 		}
 	}
+}
+
+func TestServer_Shutdown_StopsStoppers(t *testing.T) {
+	cfg := &config.Config{Port: ":0"}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	logger := &MockLogger{}
+
+	stopped := false
+	stub := &stubStopper{onStop: func() { stopped = true }}
+
+	srv := NewServer(cfg, handler, logger, stub)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+	if !stopped {
+		t.Error("Expected Stopper.Stop() to be called during shutdown")
+	}
+}
+
+type stubStopper struct {
+	onStop func()
+}
+
+func (s *stubStopper) Stop() {
+	if s.onStop != nil {
+		s.onStop()
+	}
+}
+
+func TestSlogLogger(t *testing.T) {
+	logger := NewSlogLogger()
+	if logger == nil {
+		t.Fatal("NewSlogLogger returned nil")
+	}
+
+	// These should not panic
+	logger.Info("test info", "key", "value")
+	logger.Warn("test warn", "key", "value")
+	logger.Error("test error", "key", "value")
+
+	derived := logger.With("request_id", "abc123")
+	if derived == nil {
+		t.Fatal("With returned nil")
+	}
+
+	// Derived logger should implement Logger interface
+	derived.Info("derived info")
 }

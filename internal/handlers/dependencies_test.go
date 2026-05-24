@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/zhorvath83/flux-provider-pushover/internal/config"
@@ -54,6 +56,7 @@ func TestCreateServerDependencies_FullIntegration(t *testing.T) {
 	cfg := &config.Config{
 		PushoverUserKey:  "test_user",
 		PushoverAPIToken: "test_token",
+		BearerToken:      "Bearer test_token",
 		PushoverURL:      "https://api.pushover.net/1/messages.json",
 		Port:             ":8080",
 	}
@@ -73,12 +76,24 @@ func TestCreateServerDependencies_FullIntegration(t *testing.T) {
 		t.Fatal("CreateRouter returned nil")
 	}
 
-	// Verify all routes are registered
-	testPaths := []string{"/", "/health", "/webhook"}
-	for _, path := range testPaths {
-		t.Run("path_"+path, func(t *testing.T) {
-			// Routes are registered, we already test them individually
-			// This just verifies they're connected
+	testPaths := []struct {
+		path   string
+		method string
+		status int
+	}{
+		{"/", "GET", http.StatusBadRequest},
+		{"/health", "GET", http.StatusOK},
+		{"/webhook", "POST", http.StatusUnauthorized},
+	}
+	for _, tt := range testPaths {
+		t.Run("path_"+tt.path, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, req)
+			if rr.Code != tt.status {
+				t.Errorf("Expected status %d for %s %s, got %d", tt.status, tt.method, tt.path, rr.Code)
+			}
 		})
 	}
 }
+

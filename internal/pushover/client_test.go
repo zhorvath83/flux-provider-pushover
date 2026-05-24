@@ -18,7 +18,10 @@ type MockHTTPClient struct {
 }
 
 func (m *MockHTTPClient) Do(req *http.Request) (*http.Response, error) {
-	return m.DoFunc(req)
+	if m.DoFunc != nil {
+		return m.DoFunc(req)
+	}
+	return nil, fmt.Errorf("MockHTTPClient.DoFunc not set")
 }
 
 func TestNewPushoverClient(t *testing.T) {
@@ -128,6 +131,7 @@ func TestPushoverClient_SendMessage(t *testing.T) {
 			}
 
 			client := NewPushoverClient(mockClient, "http://test.example.com")
+			client.retryCfg = RetryConfig{MaxAttempts: 1}
 			ctx := context.Background()
 
 			err := client.SendMessage(ctx, tt.msg)
@@ -174,6 +178,7 @@ func TestPushoverClient_SendMessage_Context(t *testing.T) {
 	}
 
 	client := NewPushoverClient(mockClient, "http://test.example.com")
+	client.retryCfg = RetryConfig{MaxAttempts: 1}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -222,6 +227,7 @@ func BenchmarkPushoverClient_SendMessage(b *testing.B) {
 	}
 
 	client := NewPushoverClient(mockClient, "http://test.example.com")
+	client.retryCfg = RetryConfig{MaxAttempts: 1}
 	ctx := context.Background()
 
 	msg := &types.PushoverMessage{
@@ -234,5 +240,166 @@ func BenchmarkPushoverClient_SendMessage(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = client.SendMessage(ctx, msg)
+	}
+}
+
+func TestPushoverClient_Retry_SuccessAfter5xx(t *testing.T) {
+	callCount := 0
+	mockClient := &MockHTTPClient{
+		DoFunc: func(req *http.Request) (*http.Response, error) {
+			callCount++
+			if callCount < 3 {
+				return &http.Response{
+					StatusCode: http.StatusServiceUnavailable,
+					Body:       io.NopCloser(strings.NewReader("temporarily unavailable")),
+				}, nil
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"status":1}`)),
+			}, nil
+		},
+	}
+
+	client := NewPushoverClient(mockClient, "http://test.example.com")
+	client.retryCfg = RetryConfig{
+		InitialDelay: 1 * time.Millisecond,
+		MaxDelay:     5 * time.Millisecond,
+		Multiplier:   2.0,
+		MaxAttempts:  3,
+	}
+
+	msg := &types.PushoverMessage{Token: "t", User: "u", Title: "T", Message: "M"}
+	err := client.SendMessage(context.Background(), msg)
+	if err != nil {
+		t.Errorf("Expected success after retry, got: %v", err)
+	}
+	if callCount != 3 {
+		t.Errorf("Expected 3 attempts, got %d", callCount)
+	}
+}
+
+func TestPushoverClient_Retry_Exhausted(t *testing.T) {
+	callCount := 0
+	mockClient := &MockHTTPClient{
+		DoFunc: func(req *http.Request) (*http.Response, error) {
+			callCount++
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       io.NopCloser(strings.NewReader("error")),
+			}, nil
+		},
+	}
+
+	client := NewPushoverClient(mockClient, "http://test.example.com")
+	client.retryCfg = RetryConfig{
+		InitialDelay: 1 * time.Millisecond,
+		MaxDelay:     5 * time.Millisecond,
+		Multiplier:   2.0,
+		MaxAttempts:  3,
+	}
+
+	msg := &types.PushoverMessage{Token: "t", User: "u", Title: "T", Message: "M"}
+	err := client.SendMessage(context.Background(), msg)
+	if err == nil {
+		t.Error("Expected error after exhausted retries")
+	}
+	if callCount != 3 {
+		t.Errorf("Expected 3 attempts, got %d", callCount)
+	}
+}
+
+func TestPushoverClient_Retry_4xxNoRetry(t *testing.T) {
+	callCount := 0
+	mockClient := &MockHTTPClient{
+		DoFunc: func(req *http.Request) (*http.Response, error) {
+			callCount++
+			return &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Body:       io.NopCloser(strings.NewReader(`{"errors":["invalid token"]}`)),
+			}, nil
+		},
+	}
+
+	client := NewPushoverClient(mockClient, "http://test.example.com")
+	client.retryCfg = RetryConfig{
+		InitialDelay: 1 * time.Millisecond,
+		MaxDelay:     5 * time.Millisecond,
+		Multiplier:   2.0,
+		MaxAttempts:  3,
+	}
+
+	msg := &types.PushoverMessage{Token: "t", User: "u", Title: "T", Message: "M"}
+	err := client.SendMessage(context.Background(), msg)
+	if err == nil {
+		t.Error("Expected error for 400")
+	}
+	if callCount != 1 {
+		t.Errorf("4xx should not be retried, expected 1 attempt, got %d", callCount)
+	}
+}
+
+func TestPushoverClient_Retry_CancelledContext(t *testing.T) {
+	callCount := 0
+	mockClient := &MockHTTPClient{
+		DoFunc: func(req *http.Request) (*http.Response, error) {
+			callCount++
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       io.NopCloser(strings.NewReader("error")),
+			}, nil
+		},
+	}
+
+	client := NewPushoverClient(mockClient, "http://test.example.com")
+	client.retryCfg = RetryConfig{
+		InitialDelay: 50 * time.Millisecond,
+		MaxDelay:     100 * time.Millisecond,
+		Multiplier:   2.0,
+		MaxAttempts:  5,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	msg := &types.PushoverMessage{Token: "t", User: "u", Title: "T", Message: "M"}
+	err := client.SendMessage(ctx, msg)
+	if err == nil {
+		t.Error("Expected error due to context cancellation")
+	}
+}
+
+func TestIsRetryable_WrappedError(t *testing.T) {
+	// errors.As should match even when the error is wrapped
+	inner := &networkError{err: fmt.Errorf("connection refused")}
+	wrapped := fmt.Errorf("pushover call failed: %w", inner)
+
+	if !isRetryable(wrapped) {
+		t.Error("Expected wrapped networkError to be retryable")
+	}
+
+	nonRetryable := fmt.Errorf("some other error: %w", fmt.Errorf("not retryable"))
+	if isRetryable(nonRetryable) {
+		t.Error("Expected non-retryable wrapped error to not be retryable")
+	}
+}
+
+func TestIsRetryable_DirectTypes(t *testing.T) {
+	if !isRetryable(&networkError{err: fmt.Errorf("timeout")}) {
+		t.Error("networkError should be retryable")
+	}
+	if !isRetryable(&retryableError{status: 500, body: "error"}) {
+		t.Error("retryableError should be retryable")
+	}
+	if isRetryable(fmt.Errorf("plain error")) {
+		t.Error("plain error should not be retryable")
+	}
+}
+
+func TestRetryableError_Error(t *testing.T) {
+	err := &retryableError{status: 503, body: "service unavailable"}
+	expected := "pushover API returned status 503: service unavailable"
+	if err.Error() != expected {
+		t.Errorf("Expected %q, got %q", expected, err.Error())
 	}
 }

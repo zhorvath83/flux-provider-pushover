@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/zhorvath83/flux-provider-pushover/internal/config"
+	"github.com/zhorvath83/flux-provider-pushover/internal/server"
 	"github.com/zhorvath83/flux-provider-pushover/internal/types"
 )
 
@@ -19,14 +20,20 @@ type MockLogger struct {
 	messages []string
 }
 
-func (m *MockLogger) Printf(format string, v ...interface{}) {
-	// Store formatted messages for verification in tests
-	m.messages = append(m.messages, format)
+func (m *MockLogger) Info(msg string, args ...any) {
+	m.messages = append(m.messages, msg)
 }
 
-func (m *MockLogger) Println(v ...interface{}) {
-	// Store messages for verification in tests
-	m.messages = append(m.messages, "println")
+func (m *MockLogger) Warn(msg string, args ...any) {
+	m.messages = append(m.messages, msg)
+}
+
+func (m *MockLogger) Error(msg string, args ...any) {
+	m.messages = append(m.messages, msg)
+}
+
+func (m *MockLogger) With(args ...any) server.Logger {
+	return m
 }
 
 // MockPushoverClient for testing
@@ -126,8 +133,9 @@ func TestCreateWebhookHandler(t *testing.T) {
 				Severity: "error",
 				Message:  "Test message",
 			},
-			pushoverError:  fmt.Errorf("connection timeout"),
-			expectedStatus: http.StatusInternalServerError,
+			pushoverError:    fmt.Errorf("connection timeout"),
+			expectedStatus:   http.StatusBadGateway,
+			expectedResponse: types.ResponseUpstreamError,
 		},
 		{
 			name:       "valid request with app-version metadata",
@@ -430,5 +438,46 @@ func BenchmarkCreateWebhookHandler(b *testing.B) {
 
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
+	}
+}
+
+func TestCreateWebhookHandler_AuthTimingSafe(t *testing.T) {
+	tests := []struct {
+		name       string
+		authHeader string
+	}{
+		{"empty header", ""},
+		{"prefix match only", "Bearer test_toke"},
+		{"different length", "Bearer test_token_extra"},
+		{"no Bearer prefix", "test_token"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				PushoverAPIToken: "test_token",
+				PushoverUserKey:  "test_user",
+				BearerToken:      "Bearer test_token",
+			}
+
+			deps := &HandlerDependencies{
+				Config:         cfg,
+				PushoverClient: &MockPushoverClient{},
+				Logger:         &MockLogger{},
+				MessageBuilder: BuildPushoverMessage,
+			}
+
+			handler := CreateWebhookHandler(deps)
+
+			req, _ := http.NewRequest("POST", "/webhook", nil)
+			req.Header.Set("Authorization", tt.authHeader)
+
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusUnauthorized {
+				t.Errorf("Expected %d for auth header %q, got %d", http.StatusUnauthorized, tt.authHeader, rr.Code)
+			}
+		})
 	}
 }
