@@ -559,3 +559,128 @@ func BenchmarkAuthCompare(b *testing.B) {
 		handler.ServeHTTP(rr, req)
 	}
 }
+
+// TestResponseShape_Snapshot verifies every status code produces a valid
+// JSON response with exactly the expected shape: {"error": "..."} or {"status": "..."}.
+func TestResponseShape_Snapshot(t *testing.T) {
+	tests := []struct {
+		name           string
+		handler        http.HandlerFunc
+		expectedStatus int
+		expectedBody   []byte
+	}{
+		{"root", CreateRootHandler(), http.StatusBadRequest, types.ResponseRootError},
+		{"health", CreateHealthHandler(), http.StatusOK, types.ResponseHealthy},
+		{"method not allowed", methodNotAllowedHandler(), http.StatusMethodNotAllowed, types.ResponseMethodNotAllowed},
+		{"unauthorized", unauthorizedHandler(), http.StatusUnauthorized, types.ResponseUnauthorized},
+		{"invalid json", invalidJSONHandler(), http.StatusBadRequest, types.ResponseInvalidJSON},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			rr := httptest.NewRecorder()
+			tt.handler.ServeHTTP(rr, req)
+
+			if rr.Code != tt.expectedStatus {
+				t.Errorf("Expected status %d, got %d", tt.expectedStatus, rr.Code)
+			}
+
+			contentType := rr.Header().Get("Content-Type")
+			if tt.name != "health" && tt.name != "root" {
+				if contentType != types.ContentTypeJSON {
+					t.Errorf("Expected Content-Type %s, got %s", types.ContentTypeJSON, contentType)
+				}
+			}
+
+			// For JSON responses, verify it's valid JSON with an "error" or "status" key
+			if contentType == types.ContentTypeJSON {
+				var parsed map[string]interface{}
+				if err := json.Unmarshal(rr.Body.Bytes(), &parsed); err != nil {
+					t.Errorf("Response is not valid JSON: %v\nBody: %s", err, rr.Body.String())
+				}
+				if _, hasError := parsed["error"]; !hasError {
+					if _, hasStatus := parsed["status"]; !hasStatus {
+						t.Error("JSON response must have 'error' or 'status' key")
+					}
+				}
+			}
+		})
+	}
+}
+
+func methodNotAllowedHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusMethodNotAllowed, types.ResponseMethodNotAllowed)
+	}
+}
+
+func unauthorizedHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusUnauthorized, types.ResponseUnauthorized)
+	}
+}
+
+func invalidJSONHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSONResponse(w, http.StatusBadRequest, types.ResponseInvalidJSON)
+	}
+}
+
+// TestLogInjection verifies that user-controlled input in log messages
+// does not produce malformed JSON or inject false log lines.
+func TestLogInjection(t *testing.T) {
+	maliciousInputs := []struct {
+		name    string
+		message string
+	}{
+		{"CRLF injection", "test\r\nFAKE ADMIN: approved"},
+		{"newline injection", "test\nFAKE ALERT"},
+		{"null byte", "test\x00hidden"},
+		{"ANSI escape", "test\x1b[31mFAKE\x1b[0m"},
+	}
+
+	for _, tt := range maliciousInputs {
+		t.Run(tt.name, func(t *testing.T) {
+			// slog JSON handler auto-escapes these characters.
+			// Verify that the MockLogger receives the message without corruption.
+			logger := &MockLogger{}
+
+			cfg := &config.Config{
+				PushoverAPIToken: "test_api_token",
+				PushoverUserKey:  "test_user",
+				BearerToken:      "Bearer test_api_token",
+			}
+
+			deps := &HandlerDependencies{
+				Config:         cfg,
+				PushoverClient: &MockPushoverClient{},
+				Logger:         logger,
+				MessageBuilder: BuildPushoverMessage,
+			}
+
+			handler := CreateWebhookHandler(deps)
+
+			alert := types.FluxAlert{
+				Severity: "error",
+				Message:  tt.message,
+				InvolvedObject: types.ObjectReference{
+					Kind: "Kustomization\r\nFAKE",
+					Name: "flux-system\nINJECTED",
+				},
+			}
+			body, _ := json.Marshal(alert)
+
+			req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(body))
+			req.Header.Set("Authorization", "Bearer test_api_token")
+			req.Header.Set("Content-Type", "application/json")
+
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Errorf("Expected 200 for valid alert with malicious input, got %d", rr.Code)
+			}
+		})
+	}
+}

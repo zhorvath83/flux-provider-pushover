@@ -250,3 +250,35 @@ func TestRateLimitMiddleware_ResponseFormat(t *testing.T) {
 		t.Errorf("Expected body %q, got %q", types.ResponseRateLimitError, rr.Body.String())
 	}
 }
+
+func TestIPRateLimiter_TokenRefill(t *testing.T) {
+	// Verify that after exhausting the burst, tokens refill over time.
+	// Rate=10/s means 1 token every 100ms, burst=3.
+	rl := NewIPRateLimiter(RateLimiterConfig{
+		Rate:  10, // 10 tokens/sec = 1 per 100ms
+		Burst: 3,
+		TTL:   1 * time.Hour,
+	})
+	defer rl.Stop()
+
+	// Exhaust burst
+	if !rl.Allow("1.2.3.4") {
+		t.Error("1st request should be allowed")
+	}
+	if !rl.Allow("1.2.3.4") {
+		t.Error("2nd request should be allowed")
+	}
+	if !rl.Allow("1.2.3.4") {
+		t.Error("3rd request should be allowed")
+	}
+	if rl.Allow("1.2.3.4") {
+		t.Error("4th request should be rejected (burst exhausted)")
+	}
+
+	// Wait for tokens to refill (150ms ≈ 1-2 tokens)
+	time.Sleep(150 * time.Millisecond)
+
+	if !rl.Allow("1.2.3.4") {
+		t.Error("Request after refill should be allowed")
+	}
+}
