@@ -28,6 +28,7 @@ func RunApp(configLoader config.ConfigLoader, logger server.Logger) error {
 
 	srv := server.NewServer(cfg, handler, logger, rateLimiter)
 	if err := srv.Start(); err != nil {
+		rateLimiter.Stop()
 		return err
 	}
 

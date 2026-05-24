@@ -39,19 +39,19 @@ type HTTPClient interface {
 
 // PushoverClient handles communication with Pushover API
 type PushoverClient struct {
-	client    HTTPClient
-	url       string
-	retryCfg  RetryConfig
-	circuit   *CircuitBreaker
+	client   HTTPClient
+	url      string
+	retryCfg RetryConfig
+	circuit  *CircuitBreaker
 }
 
 // NewPushoverClient creates a new Pushover client
 func NewPushoverClient(client HTTPClient, url string) *PushoverClient {
 	return &PushoverClient{
-		client:  client,
-		url:     url,
+		client:   client,
+		url:      url,
 		retryCfg: DefaultRetryConfig,
-		circuit: NewCircuitBreaker(DefaultCircuitBreakerConfig),
+		circuit:  NewCircuitBreaker(DefaultCircuitBreakerConfig),
 	}
 }
 
@@ -190,4 +190,3 @@ func CreateOptimizedHTTPClient(timeout time.Duration) *http.Client {
 		Transport: transport,
 	}
 }
-

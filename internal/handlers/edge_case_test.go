@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -23,7 +24,7 @@ func (m *MockHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	if m.DoFunc != nil {
 		return m.DoFunc(req)
 	}
-	return nil, nil
+	return nil, fmt.Errorf("MockHTTPClient.DoFunc not set")
 }
 
 func TestServer_StartError(t *testing.T) {
@@ -40,11 +41,11 @@ func TestServer_StartError(t *testing.T) {
 
 	err := srv.Start()
 	if err == nil {
-		t.Error("Expected error for invalid port")
+		t.Fatal("Expected error for invalid port, got nil")
 	}
 }
 
-func TestServer_ShutdownWithError(t *testing.T) {
+func TestServer_ShutdownWithCancelledContext(t *testing.T) {
 	cfg := &config.Config{
 		Port: ":0",
 	}
@@ -62,12 +63,11 @@ func TestServer_ShutdownWithError(t *testing.T) {
 
 	err := srv.Shutdown(ctx)
 	if err == nil {
-		t.Log("Shutdown completed without error (server wasn't running)")
-	} else {
-		expectedError := "server forced to shutdown: context canceled"
-		if err.Error() != expectedError {
-			t.Logf("Got shutdown error: %v", err)
-		}
+		// Server wasn't started, so shutdown succeeds immediately
+		return
+	}
+	if !strings.Contains(err.Error(), "context canceled") && !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("Expected context-related error, got: %v", err)
 	}
 }
 
@@ -95,10 +95,10 @@ func TestPushoverClient_SendMessage_EdgeCases(t *testing.T) {
 
 	err := client.SendMessage(ctx, msg)
 	if err == nil {
-		t.Error("Expected error for bad status code")
+		t.Fatal("Expected error for bad status code, got nil")
 	}
 
 	if !strings.Contains(err.Error(), "pushover API returned status 400") {
-		t.Errorf("Unexpected error message: %v", err)
+		t.Fatalf("Expected error containing 'pushover API returned status 400', got: %v", err)
 	}
 }

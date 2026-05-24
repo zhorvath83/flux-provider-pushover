@@ -425,16 +425,50 @@ func TestCreatePushoverMessage_Truncation(t *testing.T) {
 
 func TestValidateAlert_FieldLengths(t *testing.T) {
 	tests := []struct {
-		name      string
-		alert     *types.FluxAlert
-		wantError bool
+		name       string
+		alert      *types.FluxAlert
+		wantError  bool
+		errorField string // substring expected in error message
 	}{
 		{
-			name: "message too long",
+			name:       "message too long",
+			alert:      &types.FluxAlert{Message: strings.Repeat("x", MaxMessageFieldLen+1)},
+			wantError:  true,
+			errorField: "message",
+		},
+		{
+			name: "reason too long",
 			alert: &types.FluxAlert{
-				Message: strings.Repeat("x", MaxMessageFieldLen+1),
+				Reason: strings.Repeat("r", MaxStringFieldLen+1),
 			},
-			wantError: true,
+			wantError:  true,
+			errorField: "reason",
+		},
+		{
+			name: "severity too long",
+			alert: &types.FluxAlert{
+				Severity: strings.Repeat("s", MaxStringFieldLen+1),
+			},
+			wantError:  true,
+			errorField: "severity",
+		},
+		{
+			name: "reportingController too long",
+			alert: &types.FluxAlert{
+				ReportingController: strings.Repeat("c", MaxStringFieldLen+1),
+			},
+			wantError:  true,
+			errorField: "reportingController",
+		},
+		{
+			name: "kind too long",
+			alert: &types.FluxAlert{
+				InvolvedObject: types.ObjectReference{
+					Kind: strings.Repeat("k", MaxStringFieldLen+1),
+				},
+			},
+			wantError:  true,
+			errorField: "kind",
 		},
 		{
 			name: "name too long",
@@ -443,7 +477,18 @@ func TestValidateAlert_FieldLengths(t *testing.T) {
 					Name: strings.Repeat("x", MaxStringFieldLen+1),
 				},
 			},
-			wantError: true,
+			wantError:  true,
+			errorField: "name",
+		},
+		{
+			name: "namespace too long",
+			alert: &types.FluxAlert{
+				InvolvedObject: types.ObjectReference{
+					Namespace: strings.Repeat("n", MaxStringFieldLen+1),
+				},
+			},
+			wantError:  true,
+			errorField: "namespace",
 		},
 		{
 			name: "too many metadata entries",
@@ -456,7 +501,8 @@ func TestValidateAlert_FieldLengths(t *testing.T) {
 					return m
 				}(),
 			},
-			wantError: true,
+			wantError:  true,
+			errorField: "metadata",
 		},
 		{
 			name: "metadata key too long",
@@ -465,14 +511,28 @@ func TestValidateAlert_FieldLengths(t *testing.T) {
 					strings.Repeat("k", MaxMetadataKeyLen+1): "value",
 				},
 			},
-			wantError: true,
+			wantError:  true,
+			errorField: "metadata key",
+		},
+		{
+			name: "metadata value too long",
+			alert: &types.FluxAlert{
+				Metadata: map[string]string{
+					"valid_key": strings.Repeat("v", MaxMetadataValueLen+1),
+				},
+			},
+			wantError:  true,
+			errorField: "metadata value",
 		},
 		{
 			name: "valid within limits",
 			alert: &types.FluxAlert{
-				Message: strings.Repeat("x", MaxMessageFieldLen),
+				Message:  strings.Repeat("x", MaxMessageFieldLen),
+				Reason:   strings.Repeat("r", MaxStringFieldLen),
+				Severity: strings.Repeat("s", MaxStringFieldLen),
 				InvolvedObject: types.ObjectReference{
-					Name: strings.Repeat("n", MaxStringFieldLen),
+					Name:      strings.Repeat("n", MaxStringFieldLen),
+					Namespace: strings.Repeat("n", MaxStringFieldLen),
 				},
 			},
 			wantError: false,
@@ -484,6 +544,11 @@ func TestValidateAlert_FieldLengths(t *testing.T) {
 			err := ValidateAlert(tt.alert)
 			if (err != nil) != tt.wantError {
 				t.Errorf("ValidateAlert() error = %v, wantError %v", err, tt.wantError)
+			}
+			if tt.wantError && err != nil && tt.errorField != "" {
+				if !strings.Contains(err.Error(), tt.errorField) {
+					t.Errorf("Expected error to contain %q, got %q", tt.errorField, err.Error())
+				}
 			}
 		})
 	}

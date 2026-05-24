@@ -90,7 +90,6 @@ func TestCreateWebhookHandler(t *testing.T) {
 		pushoverError    error
 		expectedStatus   int
 		expectedResponse []byte
-		testMode         bool
 	}{
 		{
 			name:             "unauthorized request",
@@ -106,18 +105,7 @@ func TestCreateWebhookHandler(t *testing.T) {
 			expectedResponse: types.ResponseInvalidJSON,
 		},
 		{
-			name:       "valid request in test mode",
-			authHeader: "Bearer test_api_token",
-			body: types.FluxAlert{
-				Severity: "error",
-				Message:  "Test message",
-			},
-			testMode:         true,
-			expectedStatus:   http.StatusOK,
-			expectedResponse: types.ResponseOK,
-		},
-		{
-			name:       "valid request normal mode",
+			name:       "valid request",
 			authHeader: "Bearer test_token",
 			body: types.FluxAlert{
 				Severity: "error",
@@ -168,11 +156,6 @@ func TestCreateWebhookHandler(t *testing.T) {
 				BearerToken:      "Bearer test_token",
 			}
 
-			if tt.testMode {
-				cfg.PushoverAPIToken = "test_api_token"
-				cfg.BearerToken = "Bearer test_api_token"
-			}
-
 			mockPushover := &MockPushoverClient{
 				SendMessageFunc: func(ctx context.Context, msg *types.PushoverMessage) error {
 					return tt.pushoverError
@@ -217,9 +200,9 @@ func TestCreateWebhookHandler(t *testing.T) {
 
 func TestCreateWebhookHandler_UnknownTopLevelField(t *testing.T) {
 	cfg := &config.Config{
-		PushoverAPIToken: "test_api_token",
+		PushoverAPIToken: "test_token",
 		PushoverUserKey:  "test_user",
-		BearerToken:      "Bearer test_api_token",
+		BearerToken:      "Bearer test_token",
 	}
 
 	deps := &HandlerDependencies{
@@ -248,7 +231,7 @@ func TestCreateWebhookHandler_UnknownTopLevelField(t *testing.T) {
 
 	bodyBytes, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(bodyBytes))
-	req.Header.Set("Authorization", "Bearer test_api_token")
+	req.Header.Set("Authorization", "Bearer test_token")
 	req.Header.Set("Content-Type", "application/json")
 
 	rr := httptest.NewRecorder()
@@ -261,9 +244,9 @@ func TestCreateWebhookHandler_UnknownTopLevelField(t *testing.T) {
 
 func TestCreateWebhookHandler_MetadataWithMultipleKeys(t *testing.T) {
 	cfg := &config.Config{
-		PushoverAPIToken: "test_api_token",
+		PushoverAPIToken: "test_token",
 		PushoverUserKey:  "test_user",
-		BearerToken:      "Bearer test_api_token",
+		BearerToken:      "Bearer test_token",
 	}
 
 	deps := &HandlerDependencies{
@@ -293,7 +276,7 @@ func TestCreateWebhookHandler_MetadataWithMultipleKeys(t *testing.T) {
 
 	bodyBytes, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(bodyBytes))
-	req.Header.Set("Authorization", "Bearer test_api_token")
+	req.Header.Set("Authorization", "Bearer test_token")
 	req.Header.Set("Content-Type", "application/json")
 
 	rr := httptest.NewRecorder()
@@ -409,9 +392,9 @@ func TestCreateRouter(t *testing.T) {
 // Benchmark tests
 func BenchmarkCreateWebhookHandler(b *testing.B) {
 	cfg := &config.Config{
-		PushoverAPIToken: "test_api_token",
+		PushoverAPIToken: "test_token",
 		PushoverUserKey:  "test_user",
-		BearerToken:      "Bearer test_api_token",
+		BearerToken:      "Bearer test_token",
 	}
 
 	deps := &HandlerDependencies{
@@ -433,7 +416,7 @@ func BenchmarkCreateWebhookHandler(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(body))
-		req.Header.Set("Authorization", "Bearer test_api_token")
+		req.Header.Set("Authorization", "Bearer test_token")
 		req.Header.Set("Content-Type", "application/json")
 
 		rr := httptest.NewRecorder()
@@ -536,10 +519,94 @@ func TestCreateWebhookHandler_NoUpstreamErrorLeakage(t *testing.T) {
 }
 
 func BenchmarkAuthCompare(b *testing.B) {
+	b.Run("correct_token", func(b *testing.B) {
+		cfg := &config.Config{
+			PushoverAPIToken: "test_token",
+			PushoverUserKey:  "test_user",
+			BearerToken:      "Bearer test_token_abcdef1234567890",
+		}
+
+		deps := &HandlerDependencies{
+			Config:         cfg,
+			PushoverClient: &MockPushoverClient{},
+			Logger:         &MockLogger{},
+			MessageBuilder: BuildPushoverMessage,
+		}
+
+		handler := CreateWebhookHandler(deps)
+		alert := types.FluxAlert{Severity: "error", Message: "bench"}
+		body, _ := json.Marshal(alert)
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(body))
+			req.Header.Set("Authorization", "Bearer test_token_abcdef1234567890")
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+		}
+	})
+
+	b.Run("incorrect_token", func(b *testing.B) {
+		cfg := &config.Config{
+			PushoverAPIToken: "test_token",
+			PushoverUserKey:  "test_user",
+			BearerToken:      "Bearer test_token_abcdef1234567890",
+		}
+
+		deps := &HandlerDependencies{
+			Config:         cfg,
+			PushoverClient: &MockPushoverClient{},
+			Logger:         &MockLogger{},
+			MessageBuilder: BuildPushoverMessage,
+		}
+
+		handler := CreateWebhookHandler(deps)
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			req, _ := http.NewRequest("POST", "/webhook", nil)
+			req.Header.Set("Authorization", "Bearer wrong_token_abcdef1234567890")
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+		}
+	})
+
+	b.Run("prefix_match", func(b *testing.B) {
+		// Token that matches the prefix but differs at the end
+		// This is the most dangerous timing attack vector
+		cfg := &config.Config{
+			PushoverAPIToken: "test_token",
+			PushoverUserKey:  "test_user",
+			BearerToken:      "Bearer test_token_abcdef1234567890",
+		}
+
+		deps := &HandlerDependencies{
+			Config:         cfg,
+			PushoverClient: &MockPushoverClient{},
+			Logger:         &MockLogger{},
+			MessageBuilder: BuildPushoverMessage,
+		}
+
+		handler := CreateWebhookHandler(deps)
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			req, _ := http.NewRequest("POST", "/webhook", nil)
+			req.Header.Set("Authorization", "Bearer test_token_abcdef123456789X")
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+		}
+	})
+}
+
+// TestCreateWebhookHandler_MethodNotAllowed verifies that non-POST methods
+// receive a 405 Method Not Allowed response.
+func TestCreateWebhookHandler_MethodNotAllowed(t *testing.T) {
 	cfg := &config.Config{
 		PushoverAPIToken: "test_token",
 		PushoverUserKey:  "test_user",
-		BearerToken:      "Bearer test_token_abcdef1234567890",
+		BearerToken:      "Bearer test_token",
 	}
 
 	deps := &HandlerDependencies{
@@ -551,12 +618,85 @@ func BenchmarkAuthCompare(b *testing.B) {
 
 	handler := CreateWebhookHandler(deps)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		req, _ := http.NewRequest("POST", "/webhook", nil)
-		req.Header.Set("Authorization", "Bearer wrong_token_abcdef1234567890")
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+	methods := []string{"GET", "PUT", "DELETE", "PATCH"}
+	for _, method := range methods {
+		t.Run(method, func(t *testing.T) {
+			req, _ := http.NewRequest(method, "/webhook", nil)
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusMethodNotAllowed {
+				t.Errorf("Expected %d for %s /webhook, got %d", http.StatusMethodNotAllowed, method, rr.Code)
+			}
+			if !bytes.Equal(rr.Body.Bytes(), types.ResponseMethodNotAllowed) {
+				t.Errorf("Expected body %s, got %s", types.ResponseMethodNotAllowed, rr.Body.String())
+			}
+		})
+	}
+}
+
+// TestCreateWebhookHandler_ValidateAlertRejection verifies that valid JSON
+// which fails ValidateAlert returns 400 Bad Request through the webhook handler.
+func TestCreateWebhookHandler_ValidateAlertRejection(t *testing.T) {
+	cfg := &config.Config{
+		PushoverAPIToken: "test_token",
+		PushoverUserKey:  "test_user",
+		BearerToken:      "Bearer test_token",
+	}
+
+	deps := &HandlerDependencies{
+		Config:         cfg,
+		PushoverClient: &MockPushoverClient{},
+		Logger:         &MockLogger{},
+		MessageBuilder: BuildPushoverMessage,
+	}
+
+	handler := CreateWebhookHandler(deps)
+
+	tests := []struct {
+		name string
+		body interface{}
+	}{
+		{
+			name: "message exceeds max length",
+			body: &types.FluxAlert{
+				Severity: "error",
+				Message:  strings.Repeat("x", MaxMessageFieldLen+1),
+			},
+		},
+		{
+			name: "too many metadata entries",
+			body: &types.FluxAlert{
+				Severity: "error",
+				Message:  "test",
+				Metadata: func() map[string]string {
+					m := make(map[string]string)
+					for i := 0; i < MaxMetadataEntries+1; i++ {
+						m[fmt.Sprintf("key%d", i)] = "val"
+					}
+					return m
+				}(),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bodyBytes, _ := json.Marshal(tt.body)
+			req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(bodyBytes))
+			req.Header.Set("Authorization", "Bearer test_token")
+			req.Header.Set("Content-Type", "application/json")
+
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("Expected %d for %s, got %d", http.StatusBadRequest, tt.name, rr.Code)
+			}
+			if !bytes.Equal(rr.Body.Bytes(), types.ResponseInvalidJSON) {
+				t.Errorf("Expected body %s, got %s", types.ResponseInvalidJSON, rr.Body.String())
+			}
+		})
 	}
 }
 
@@ -627,6 +767,52 @@ func invalidJSONHandler() http.HandlerFunc {
 	}
 }
 
+// failWriter is an http.ResponseWriter whose Write method always returns an error.
+// It satisfies http.ResponseWriter with stub Header() and WriteHeader() methods.
+type failWriter struct {
+	header http.Header
+}
+
+func (fw *failWriter) Header() http.Header {
+	if fw.header == nil {
+		fw.header = make(http.Header)
+	}
+	return fw.header
+}
+
+func (fw *failWriter) WriteHeader(_ int) {}
+
+func (fw *failWriter) Write(_ []byte) (int, error) {
+	return 0, fmt.Errorf("write failed")
+}
+
+// TestCreateRootHandler_WriteFailure verifies the handler does not panic
+// when the ResponseWriter.Write fails.
+func TestCreateRootHandler_WriteFailure(t *testing.T) {
+	handler := CreateRootHandler()
+	fw := &failWriter{}
+	req := httptest.NewRequest("GET", "/", nil)
+	// Should not panic
+	handler.ServeHTTP(fw, req)
+}
+
+// TestCreateHealthHandler_WriteFailure verifies the handler does not panic
+// when the ResponseWriter.Write fails.
+func TestCreateHealthHandler_WriteFailure(t *testing.T) {
+	handler := CreateHealthHandler()
+	fw := &failWriter{}
+	req := httptest.NewRequest("GET", "/health", nil)
+	handler.ServeHTTP(fw, req)
+}
+
+// TestWriteJSONResponse_WriteFailure verifies writeJSONResponse does not panic
+// when ResponseWriter.Write returns an error.
+func TestWriteJSONResponse_WriteFailure(t *testing.T) {
+	fw := &failWriter{}
+	// Should not panic — the error is silently ignored
+	writeJSONResponse(fw, http.StatusOK, types.ResponseOK)
+}
+
 // TestLogInjection verifies that user-controlled input in log messages
 // does not produce malformed JSON or inject false log lines.
 func TestLogInjection(t *testing.T) {
@@ -647,9 +833,9 @@ func TestLogInjection(t *testing.T) {
 			logger := &MockLogger{}
 
 			cfg := &config.Config{
-				PushoverAPIToken: "test_api_token",
+				PushoverAPIToken: "test_token",
 				PushoverUserKey:  "test_user",
-				BearerToken:      "Bearer test_api_token",
+				BearerToken:      "Bearer test_token",
 			}
 
 			deps := &HandlerDependencies{
@@ -672,7 +858,7 @@ func TestLogInjection(t *testing.T) {
 			body, _ := json.Marshal(alert)
 
 			req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(body))
-			req.Header.Set("Authorization", "Bearer test_api_token")
+			req.Header.Set("Authorization", "Bearer test_token")
 			req.Header.Set("Content-Type", "application/json")
 
 			rr := httptest.NewRecorder()

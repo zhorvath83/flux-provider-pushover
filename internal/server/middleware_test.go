@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -88,5 +89,14 @@ func TestGenerateRequestID_Format(t *testing.T) {
 		if !((c >= 'a' && c <= 'z') || (c >= '2' && c <= '7')) {
 			t.Errorf("Invalid character in request ID: %c", c)
 		}
+	}
+}
+
+func TestRequestIDFromContext_NonStringValue(t *testing.T) {
+	// Store a non-string value under the requestIDKey — should return ""
+	ctx := context.WithValue(context.Background(), requestIDKey, 12345)
+	id := RequestIDFromContext(ctx)
+	if id != "" {
+		t.Errorf("Expected empty string for non-string value, got %q", id)
 	}
 }

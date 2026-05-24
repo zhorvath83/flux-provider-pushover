@@ -85,12 +85,6 @@ func CreateWebhookHandler(deps *HandlerDependencies) http.HandlerFunc {
 
 		message := deps.MessageBuilder(&alert)
 
-		if deps.Config.PushoverAPIToken == "test_api_token" {
-			log.Info("test mode: skipping Pushover send")
-			writeJSONResponse(w, http.StatusOK, types.ResponseOK)
-			return
-		}
-
 		pushoverMsg := CreatePushoverMessage(deps.Config, message)
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()

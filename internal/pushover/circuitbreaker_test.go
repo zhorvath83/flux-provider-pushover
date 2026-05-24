@@ -1,6 +1,7 @@
 package pushover
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -332,5 +333,21 @@ func TestCircuitBreaker_ReleaseInClosedState(t *testing.T) {
 	cb.Release()
 	if cb.State() != CircuitClosed {
 		t.Error("Expected closed state after Release in closed")
+	}
+}
+
+func TestCircuitBreaker_AllowUnknownState(t *testing.T) {
+	// Verify that an unknown/invalid circuit state rejects requests (fail-closed).
+	// This is a defensive check: if the state field is corrupted or set to an
+	// unexpected value, the circuit breaker must block traffic, not allow it.
+	cb := NewCircuitBreaker(DefaultCircuitBreakerConfig)
+	cb.state = CircuitState(99) // Invalid state
+
+	err := cb.Allow()
+	if err == nil {
+		t.Error("Expected Allow to reject requests for unknown state, but it allowed")
+	}
+	if !strings.Contains(err.Error(), "unknown state") {
+		t.Errorf("Expected error to mention 'unknown state', got: %v", err)
 	}
 }

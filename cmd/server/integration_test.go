@@ -18,9 +18,9 @@ type MockLogger struct {
 	Messages []string
 }
 
-func (m *MockLogger) Info(msg string, args ...any)  {}
-func (m *MockLogger) Warn(msg string, args ...any)  {}
-func (m *MockLogger) Error(msg string, args ...any) {}
+func (m *MockLogger) Info(msg string, args ...any)   {}
+func (m *MockLogger) Warn(msg string, args ...any)   {}
+func (m *MockLogger) Error(msg string, args ...any)  {}
 func (m *MockLogger) With(args ...any) server.Logger { return m }
 
 // MockPushoverClient for testing

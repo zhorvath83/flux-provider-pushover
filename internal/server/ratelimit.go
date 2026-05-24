@@ -10,17 +10,18 @@ import (
 	"github.com/zhorvath83/flux-provider-pushover/internal/types"
 	"golang.org/x/time/rate"
 )
+
 type RateLimiterConfig struct {
-	Rate  rate.Limit   // Tokens per second
-	Burst int          // Maximum burst size
+	Rate  rate.Limit    // Tokens per second
+	Burst int           // Maximum burst size
 	TTL   time.Duration // Idle bucket cleanup interval
 }
 
 // DefaultRateLimiterConfig provides sensible defaults.
 var DefaultRateLimiterConfig = RateLimiterConfig{
-	Rate:  10,             // 10 requests per second
-	Burst: 30,             // Allow bursts of 30
-	TTL:   1 * time.Hour,  // Clean up idle buckets after 1 hour
+	Rate:  10,            // 10 requests per second
+	Burst: 30,            // Allow bursts of 30
+	TTL:   1 * time.Hour, // Clean up idle buckets after 1 hour
 }
 
 // IPRateLimiter provides per-IP token bucket rate limiting.

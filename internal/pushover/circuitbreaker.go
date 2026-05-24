@@ -11,8 +11,8 @@ type CircuitState int
 
 const (
 	CircuitClosed   CircuitState = iota // Normal operation
-	CircuitOpen                          // Failing, reject requests
-	CircuitHalfOpen                      // Testing if service recovered
+	CircuitOpen                         // Failing, reject requests
+	CircuitHalfOpen                     // Testing if service recovered
 )
 
 // CircuitBreakerConfig configures the circuit breaker behavior.
@@ -70,7 +70,7 @@ func (cb *CircuitBreaker) Allow() error {
 		cb.halfOpenInFlight++
 		return nil
 	default:
-		return nil
+		return fmt.Errorf("circuit breaker in unknown state: %d", cb.state)
 	}
 }
 

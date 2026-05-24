@@ -123,12 +123,11 @@ func TestServer_WaitForShutdown_Timeout(t *testing.T) {
 
 	err := server.Shutdown(ctx)
 	if err == nil {
-		t.Log("Server shutdown completed without timeout")
-	} else if err.Error() != "server forced to shutdown: "+context.DeadlineExceeded.Error() {
-		expectedErr := fmt.Errorf("server forced to shutdown: %w", context.DeadlineExceeded)
-		if err.Error() != expectedErr.Error() {
-			t.Logf("Expected error '%v', got '%v'", expectedErr, err)
-		}
+		// Server wasn't started, so shutdown succeeds immediately — acceptable
+		return
+	}
+	if !strings.Contains(err.Error(), "context") {
+		t.Fatalf("Expected context-related error, got: %v", err)
 	}
 }
 
@@ -328,5 +327,143 @@ func TestServer_LargeHeaderRejected(t *testing.T) {
 		if resp.StatusCode != http.StatusRequestHeaderFieldsTooLarge {
 			t.Errorf("Expected %d for oversized headers, got %d", http.StatusRequestHeaderFieldsTooLarge, resp.StatusCode)
 		}
+	}
+}
+
+// serverFailWriter is an http.ResponseWriter whose Write method always returns an error.
+type serverFailWriter struct {
+	header http.Header
+}
+
+func (fw *serverFailWriter) Header() http.Header {
+	if fw.header == nil {
+		fw.header = make(http.Header)
+	}
+	return fw.header
+}
+
+func (fw *serverFailWriter) WriteHeader(_ int) {}
+
+func (fw *serverFailWriter) Write(_ []byte) (int, error) {
+	return 0, fmt.Errorf("write failed")
+}
+
+// TestWriteJSONResponse_WriteFailure verifies that writeJSONResponse does not panic
+// when the ResponseWriter.Write returns an error.
+func TestWriteJSONResponse_WriteFailure(t *testing.T) {
+	fw := &serverFailWriter{}
+	// Should not panic — the error from Write is silently ignored
+	writeJSONResponse(fw, http.StatusOK, []byte(`{"status":"ok"}`))
+}
+
+func TestServer_InflightRequestCancelledOnShutdown(t *testing.T) {
+	// Verify that an in-flight request receives context cancellation
+	// when the server shuts down (BaseContext propagation).
+	// This is the critical R2 test: a slow handler should observe
+	// r.Context().Done() when the server shuts down.
+	started := make(chan struct{})
+	cancelled := make(chan error, 1)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+		cancelled <- r.Context().Err()
+	})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to listen: %v", err)
+	}
+	addr := ln.Addr().String()
+
+	cfg := &config.Config{Port: ":0"}
+	logger := &MockLogger{}
+	srv := NewServer(cfg, handler, logger)
+
+	go srv.httpServer.Serve(ln)
+
+	// Wait for server to be ready
+	time.Sleep(50 * time.Millisecond)
+
+	// Make a request that blocks until context cancellation
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Get("http://" + addr + "/")
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+
+	// Wait for the request to reach the handler
+	<-started
+
+	// Shutdown should cancel the request context via BaseContext
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+
+	// The handler should have received context.Canceled
+	select {
+	case err := <-cancelled:
+		if err != context.Canceled {
+			t.Errorf("Expected context.Canceled, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Timed out waiting for request context cancellation")
+	}
+
+	<-done
+}
+
+// TestServer_Shutdown_ErrorOnTimeout verifies that Shutdown returns an error
+// containing "server forced to shutdown" when an in-flight request blocks
+// longer than the shutdown timeout.
+func TestServer_Shutdown_ErrorOnTimeout(t *testing.T) {
+	// Handler that ignores context cancellation and blocks for a long time
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Deliberately ignore context cancellation — simulate a stuck handler
+		time.Sleep(5 * time.Second)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to listen: %v", err)
+	}
+	addr := ln.Addr().String()
+
+	cfg := &config.Config{Port: ":0"}
+	logger := &MockLogger{}
+	srv := NewServer(cfg, handler, logger)
+
+	go srv.httpServer.Serve(ln)
+	time.Sleep(50 * time.Millisecond)
+
+	// Make a request that will block for 5 seconds
+	go func() {
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Get("http://" + addr + "/")
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Shutdown with a very short timeout — should fail because handler is stuck
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err = srv.Shutdown(ctx)
+	if err == nil {
+		t.Fatal("Expected error when shutdown timeout expires with stuck handler, got nil")
+	}
+	if !strings.Contains(err.Error(), "server forced to shutdown") {
+		t.Errorf("Expected error to contain 'server forced to shutdown', got: %v", err)
 	}
 }
