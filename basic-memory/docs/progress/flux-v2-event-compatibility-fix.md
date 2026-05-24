@@ -1,7 +1,7 @@
 ---
 title: flux-v2-event-compatibility-fix
-type: report
-permalink: flux-provider-pushover/roadmap/flux-v2-event-compatibility-fix
+type: progress
+permalink: flux-provider-pushover/docs/progress/flux-v2-event-compatibility-fix
 tags:
 - bugfix
 - security-review
@@ -83,7 +83,7 @@ A HelmRelease események elutasítása (`json: unknown field "app-version"`) mia
 - [ ] **`ExtractAlertInfo` bővítése**: Ha a jövőben az `app-version`-t is ki kell olvasni (pl. strukturáltabb logolás), a függvény bővítendő
 - [ ] **Rate limiting**: A CLAUDE.md-ben szerepel opcionális teendőként DDoS védelem
 - [ ] **Circuit breaker**: Pushover API hívásokhoz (CLAUDE.md-ben szerepel)
-- [ ] **Prometheus metrics**: Opcionális, a CLAUDE.md-ben szerepel
+- [x] ~~**Prometheus metrics**: Opcionális, a CLAUDE.md-ben szerepel~~ → **Elhalasztva** (YAGNI: lightweight middleware, slog + request ID elegendő)
 - [ ] **Connection pooling finomhangolás**: CLAUDE.md-ben szerepel
 
 ### Elutasított megközelítések (dokumentáció)
