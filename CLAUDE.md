@@ -1,57 +1,69 @@
-# Flux Provider Pushover - Go Reimplementáció
+# Flux Provider Pushover
 
 ## Projekt Áttekintés
-Ez a projekt a flux-provider-pushover Python alapú middleware szolgáltatás újraimplementációja Go nyelven. A szolgáltatás híd szerepet tölt be a FluxCD és a Pushover push notification szolgáltatás között.
+FluxCD webhook-ot Pushover push notification-né alakító Go middleware. Híd szerepet tölt be a FluxCD alert provider és a Pushover API között.
 
 ## Miért kell ez?
 - FluxCD nem támogat natív Pushover provider-t
 - A generic provider nem képes megfelelően kezelni a Pushover authentikációt
 - Szükség van egy middleware-re ami fogadja a FluxCD webhook-okat és továbbítja Pushover-nek
 
-## Technikai Követelmények
+## Architektúra
 
-### Core funkcionalitás
-1. **Webhook fogadás**: `/webhook` endpoint ami fogadja a FluxCD alert-eket
-2. **Authentikáció**: Bearer token alapú auth az API token-nel
-3. **Pushover integráció**: Alert továbbítás Pushover API-n keresztül
-4. **Health check**: `/health` endpoint Kubernetes readiness/liveness probe-hoz
+```
+FluxCD → POST /webhook → Auth (ConstantTimeCompare) → Validate → Build Message → Pushover API
+                                                         ↑
+                                                    Rate Limiter (per-IP)
+                                                    Request ID (nano-id)
+                                                    Circuit Breaker
+```
 
-### Go implementáció szempontok
-- **Minimális függőségek**: Csak a standard library + esetleg 1-2 jól megválasztott package
-- **Alacsony memóriaigény**: ~10-20MB RAM használat célzott
-- **Gyors indulás**: <1 másodperc boot time
-- **Graceful shutdown**: SIGTERM kezelés, kapcsolatok tiszta lezárása
-
-### Container szempontok
-1. **Rootless**: Non-root user (UID 65532 vagy hasonló)
-2. **Readonly filesystem**: 
-   - Csak `/tmp` írható (ha kell)
-   - Binary `/app` könyvtárban
-3. **Multi-arch**: linux/amd64 és linux/arm64 támogatás
-4. **Distroless/scratch base**: Minimális attack surface
+### Middleware lánc
+`RateLimitMiddleware → RequestIDMiddleware → Router → Handler`
 
 ## Projekt Struktúra
 
 ```
 flux-provider-pushover/
-├── main.go                 # Fő alkalmazás
-├── handler.go             # HTTP handler-ek
-├── pushover.go            # Pushover kliens
-├── config.go              # Konfiguráció kezelés
-├── Dockerfile             # Multi-stage, multi-arch build
-├── go.mod & go.sum        # Go dependencies
-├── .github/
-│   └── workflows/
-│       └── build.yml      # CI/CD pipeline
-├── kubernetes/            # K8s manifest példák
-│   ├── deployment.yaml
-│   ├── service.yaml
-│   ├── ingress.yaml
-│   └── secret.yaml
-├── README.md              # Publikus dokumentáció
-└── basic-memory/
-    └── CLAUDE.md          # Ez a fájl
-
+├── cmd/server/
+│   ├── main.go              # Entry point, wiring
+│   ├── main_test.go          # RunApp tesztek
+│   └── integration_test.go   # Handler integrációs tesztek
+├── internal/
+│   ├── config/
+│   │   ├── config.go        # Config loader + validator (functional pattern)
+│   │   └── config_test.go
+│   ├── handlers/
+│   │   ├── handlers.go      # HTTP handler-ek (webhook, health, root)
+│   │   ├── message.go       # BuildPushoverMessage, ValidateAlert, input validáció
+│   │   ├── handlers_test.go
+│   │   ├── message_test.go
+│   │   ├── edge_case_test.go
+│   │   └── dependencies_test.go
+│   ├── pushover/
+│   │   ├── client.go         # Pushover API kliens retry + circuit breaker
+│   │   ├── circuitbreaker.go # Circuit breaker (closed/open/halfOpen)
+│   │   ├── client_test.go
+│   │   └── circuitbreaker_test.go
+│   ├── server/
+│   │   ├── server.go         # HTTP server, BaseContext, Start/Shutdown
+│   │   ├── logger.go         # slog Logger interface + SlogLogger
+│   │   ├── middleware.go     # RequestID middleware (nano-id, X-Request-ID)
+│   │   ├── ratelimit.go      # Per-IP rate limiter (x/time/rate)
+│   │   ├── server_test.go
+│   │   ├── server_coverage_test.go
+│   │   ├── middleware_test.go
+│   │   └── ratelimit_test.go
+│   └── types/
+│       └── types.go         # Constants, structs, pre-defined responses
+├── Dockerfile               # Multi-stage, multi-arch, distroless/nonroot
+├── go.mod & go.sum
+├── scripts/
+│   └── runGoTests.sh
+├── .github/workflows/
+│   └── build.yml            # CI: gosec + test + build + trivy
+└── basic-memory/            # Projekt knowledge graph
+```
 
 ## API Struktúra
 
@@ -76,110 +88,68 @@ flux-provider-pushover/
 ```json
 {
   "token": "PUSHOVER_API_TOKEN",
-  "user": "PUSHOVER_USER_KEY", 
+  "user": "PUSHOVER_USER_KEY",
   "title": "FluxCD",
-  "message": "Formatted alert message",
-  "priority": 0,
-  "timestamp": 1234567890
+  "message": "Formatted alert message"
 }
 ```
 
-## Biztonsági Szempontok
-1. **No secrets in image**: Minden secret env változóból vagy mounted file-ból
-2. **Minimal permissions**: ReadOnlyRootFilesystem, RunAsNonRoot
-3. **Network policies**: Csak kimenő kapcsolat Pushover felé
-4. **Input validation**: Minden bejövő adat validálása
-5. **Rate limiting**: DDoS védelem (opcionális)
+### Middleware → Client (error)
+```json
+{"error": "Upstream service unavailable"}
+```
 
-## Test Stratégia
-- Unit testek minden komponenshez
-- Integration test mock Pushover API-val
-- E2E test real FluxCD alert payload-dal
-- Load testing vegeta vagy k6-tal
+## Biztonság
 
-## Monitoring & Observability
-- Structured JSON logs stdout-ra
-- Health endpoint monitoring
-- Opcionális: Prometheus metrics
-- Opcionális: OpenTelemetry traces
+| Védelem | Implementáció |
+|---------|---------------|
+| Auth timing attack | `crypto/subtle.ConstantTimeCompare` |
+| Error info leakage | 502 generic msg, details csak log-ban |
+| Log injection | `log/slog` JSON auto-escape |
+| Request body limit | `MaxBytesReader` 1MB |
+| Header size limit | `MaxHeaderSize` 8KB |
+| Per-field validation | MaxStringFieldLen 512, MaxMessageFieldLen 4096, metadata limits |
+| Pushover message truncation | 1024 char limit |
+| Rate limiting | Per-IP token bucket (10 req/s, burst 30) |
+| No secrets in image | Env vars / mounted files |
+| Container security | ReadOnlyRootFilesystem, RunAsNonRoot |
 
-## Fejlesztési Jegyzetek
+## Reziliencia
 
-### Env változók
-- `PUSHOVER_USER_KEY`: Kötelező, Pushover user key
-- `PUSHOVER_API_TOKEN`: Kötelező, Pushover app token + auth token
+| Feature | Implementáció |
+|---------|---------------|
+| Retry | Exponenciális backoff jitter-rel, max 2 retry (5xx/429/network only) |
+| Circuit breaker | closed → open (5 hiba) → halfOpen (30s) → closed (2 siker) |
+| Graceful shutdown | BaseContext cancel + 30s timeout + SIGTERM handling |
+| Health check timeout | 2s saját HTTP client |
+
+## Observability
+
+- **Structured JSON logs** stdout-ra (`log/slog` JSONHandler)
+- **Request ID** `X-Request-ID` header + context + log fields
+- **Log levels**: Info (success), Warn (client errors), Error (upstream failures)
+- **Health endpoint** `/health` Kubernetes probe-hoz
+
+## Env változók
+- `PUSHOVER_USER_KEY`: Kötelező
+- `PUSHOVER_API_TOKEN`: Kötelező (Pushover app token + Bearer auth token)
 - `PORT`: Opcionális, default 8080
-- `LOG_LEVEL`: Opcionális, default "info"
+- `PUSHOVER_URL`: Opcionális, default `https://api.pushover.net/1/messages.json`
 
-### Go Best Practices
-- Context használata minden async művelethez
-- Proper error wrapping (`fmt.Errorf` with `%w`)
-- Defer használata cleanup-hoz
-- No panic in production code
-- Interfaces for testability
+## Függőségek
+- `golang.org/x/time/rate` — per-IP rate limiter
+- Minden más: standard library
 
-### Performance Célok
+## Tesztek
+- `go test ./... -race` — minden zöld
+- Coverage: config 100%, handlers 86%, pushover 91%, server 81%
+- `go vet ./...` — 0 probléma
+
+## CI/CD
+- GitHub Actions: gosec → test → build (multi-arch amd64/arm64) → trivy
+- Docker image: GHCR, distroless/nonroot base, SBOM + provenance attestation
+
+## Performance Célok
 - <100ms response time webhook-okra
 - <20MB memory használat idle
-- <50MB memory használat terhelés alatt
 - <1s cold start
-- 10000+ RPS képesség (single instance)
-Biztonsági fejlesztések:**
-   - Request body méret korlátozás (1MB)
-   - Szigorúbb JSON validáció (`DisallowUnknownFields`)
-   - Health check támogatás Docker HEALTHCHECK-hez
-
-### Docker optimalizálások
-1. **Multi-arch build:** linux/amd64 és linux/arm64 támogatás
-2. **Build cache:** Docker BuildKit cache mount használata
-3. **Scratch base image:** Distroless helyett még kisebb méret
-4. **Build optimalizációk:**
-   - Multi-stage build
-   - Build cache go modulokhoz
-   - UPX tömörítés opció
-   - Timezone adat hozzáadva
-
-### Tesztelés bővítése
-1. **Új unit tesztek:**
-   - Invalid JSON payload teszt
-   - Nagy payload elutasítás teszt
-   - Üres mezők kezelése teszt
-   - Graceful shutdown teszt
-   - Konfiguráció validáció teszt
-
-2. **Benchmark tesztek:**
-   - Webhook handler benchmark
-   - Message building benchmark
-   - Memória allokáció mérések
-
-3. **Biztonsági ellenőrzések:**
-   - Race condition tesztek sikeres
-   - go vet ellenőrzés sikeres
-
-### CI/CD Pipeline
-- GitHub Actions workflow multi-arch build támogatással
-- Automatikus tesztelés, linting, security scanning
-- Docker image build és push GitHub Container Registry-be
-- Trivy vulnerability scanner integráció
-
-### Fejlesztői eszközök
-- Makefile minden gyakori feladathoz
-- Profiling támogatás (CPU és memória)
-- Security scanning gosec-kel
-- Coverage riportok
-
-### Eredmények
-- **Memóriahasználat:** <10MB idle, <20MB terhelés alatt (cél teljesítve)
-- **Válaszidő:** <100ms webhook feldolgozás
-- **Binary méret:** ~7MB
-- **Container méret:** ~10MB (scratch image)
-- **Tesztlefedettség:** 90%+
-- **Race condition:** nem detektált
-- **Külső függőségek:** 0 (csak standard library)
-
-### További optimalizálási lehetőségek
-1. Connection pooling finomhangolása
-2. HTTP/2 támogatás hozzáadása
-3. Metrikák gyűjtése (Prometheus)
-4. Rate limiting implementálása
-5. Circuit breaker pattern Pushover API hívásokhoz

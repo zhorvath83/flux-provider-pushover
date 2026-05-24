@@ -11,6 +11,47 @@ tags:
 - detailed
 ---
 
+## Implementáció Státusz
+**Státusz**: ✅ KÉSZ | **Befejezés**: 2026-05-24
+
+| ID | Elem | Státusz |
+|----|------|---------|
+| S1 | Timing-safe auth (crypto/subtle.ConstantTimeCompare) | ✅ |
+| S2 | Pushover error szivárgás javítás (502 + generic msg) | ✅ |
+| S3 | Log injection (O1 részeként megoldódik, slog auto-escape) | ✅ |
+| B1 | Go verzió alignment (go.mod toolchain go1.26.0) | ✅ |
+| O1 | slog strukturált logolás (JSON handler, Info/Warn/Error/With) | ✅ |
+| O2 | Request ID propagáció (nano-id 20char base32, X-Request-ID) | ✅ |
+| R1 | Server.Start() hibakezelés (channel error pipe, nincs os.Exit) | ✅ |
+| R2 | Shutdown context propagáció (BaseContext callback + cancel) | ✅ |
+| R3 | HealthCheck timeout (2s saját HTTP client) | ✅ |
+| R4 | MaxHeaderBytes szétválasztás (MaxHeaderSize = 8KB) | ✅ |
+| Q1-Q7 | Kódminőség javítások (mind) | ✅ |
+| R5 | Retry logika (exp backoff jitter, max 2 retry) | ✅ |
+| R6 | Circuit breaker (closed/open/halfOpen, stdlib) | ✅ |
+| R7 | Rate limiting (per-IP token bucket, x/time/rate) | ✅ |
+
+**Teszteredmények**: go test -race MINDEN ZÖLD, coverage 80%+
+**Új függőség**: golang.org/x/time/rate (R7)
+### Haladás
+
+| ID | Elem | Státusz |
+|----|------|---------|
+| S1 | Timing-safe auth összehasonlítás | ⬜ Következik |
+| S2 | Pushover error szivárgás javítás | ⬜ Vár |
+| S3 | Log injection (O1 részeként megoldódik) | ⬜ Vár |
+| B1 | Go verzió alignment | ⬜ Vár |
+| O1 | slog strukturált logolás | ⬜ Vár |
+| O2 | Request ID propagáció | ⬜ Vár (O1 függő) |
+| R1 | Server.Start() hibakezelés | ⬜ Vár |
+| R2 | Shutdown context propagáció | ⬜ Vár |
+| R3 | HealthCheck timeout | ⬜ Vár |
+| R4 | MaxHeaderBytes szétválasztás | ⬜ Vár |
+| Q1-Q7 | Kódminőség javítások | ⬜ Vár |
+| R5 | Retry logika | ⬜ Vár |
+| R6 | Circuit breaker | ⬜ Vár |
+| R7 | Rate limiting | ⬜ Vár |
+
 # Átfogó Kód Audit — Flux Provider Pushover (Részletes Kidolgozás)
 
 ## Kontextus
