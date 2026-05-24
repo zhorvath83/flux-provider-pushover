@@ -100,11 +100,19 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// SignalChan returns the channel WaitForShutdown waits on.
+// Override in tests to inject a controllable channel.
+var SignalChan = defaultSignalChan
+
+func defaultSignalChan() chan os.Signal {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	return ch
+}
+
 // WaitForShutdown waits for interrupt signal and performs graceful shutdown
 func (s *Server) WaitForShutdown() error {
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-
+	stop := SignalChan()
 	<-stop
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(types.ShutdownTimeout)*time.Second)

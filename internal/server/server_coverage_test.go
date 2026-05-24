@@ -4,6 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/signal"
+	"syscall"
 	"testing"
 	"time"
 
@@ -168,5 +171,84 @@ func TestHealthCheck_Timeout(t *testing.T) {
 	// The error should occur within approximately 2 seconds (the client timeout)
 	if elapsed > 3*time.Second {
 		t.Errorf("Health check took too long: %v, expected ~2s timeout", elapsed)
+	}
+}
+
+func TestServer_WaitForShutdown_SignalTriggersShutdown(t *testing.T) {
+	sigCh := make(chan os.Signal, 1)
+	orig := SignalChan
+	defer func() { SignalChan = orig }()
+	SignalChan = func() chan os.Signal { return sigCh }
+
+	cfg := &config.Config{Port: ":0"}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	logger := &MockLogger{}
+	srv := NewServer(cfg, handler, logger)
+
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- srv.WaitForShutdown() }()
+
+	time.Sleep(50 * time.Millisecond)
+
+	sigCh <- syscall.SIGTERM
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Expected nil on graceful shutdown, got: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitForShutdown did not complete within timeout")
+	}
+}
+
+func TestDefaultSignalChan(t *testing.T) {
+	ch := defaultSignalChan()
+	if ch == nil {
+		t.Fatal("defaultSignalChan returned nil channel")
+	}
+	if cap(ch) < 1 {
+		t.Errorf("Expected buffered channel with cap >= 1, got cap %d", cap(ch))
+	}
+	// Clean up signal registration to avoid leaking the handler
+	signal.Stop(ch)
+}
+
+func TestServer_WaitForShutdown_DelegatesToShutdown(t *testing.T) {
+	sigCh := make(chan os.Signal, 1)
+	orig := SignalChan
+	defer func() { SignalChan = orig }()
+	SignalChan = func() chan os.Signal { return sigCh }
+
+	cfg := &config.Config{Port: ":0"}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	logger := &MockLogger{}
+	srv := NewServer(cfg, handler, logger)
+
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- srv.WaitForShutdown() }()
+
+	// Send signal immediately to trigger graceful shutdown
+	sigCh <- syscall.SIGTERM
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Expected nil on graceful shutdown, got: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitForShutdown did not complete within timeout")
 	}
 }

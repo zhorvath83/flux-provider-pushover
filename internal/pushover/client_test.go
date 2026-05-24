@@ -589,6 +589,20 @@ func TestPushoverClient_ContextCancellationReleasesCircuit(t *testing.T) {
 	// but after Release halfOpenInFlight=0, so Allow succeeds again.
 }
 
+func TestPushoverClient_SendMessage_InvalidURL(t *testing.T) {
+	client := NewPushoverClient(&MockHTTPClient{}, "http://\x00invalid")
+	client.retryCfg = RetryConfig{MaxAttempts: 1}
+
+	msg := &types.PushoverMessage{Token: "t", User: "u", Title: "T", Message: "M"}
+	err := client.SendMessage(context.Background(), msg)
+	if err == nil {
+		t.Fatal("Expected error for invalid URL")
+	}
+	if !strings.Contains(err.Error(), "failed to create request") {
+		t.Errorf("Expected 'failed to create request' error, got: %v", err)
+	}
+}
+
 func TestPushoverClient_ContextCancelDuringRetryCallsRelease(t *testing.T) {
 	// Verify that SendMessage calls circuit.Release() when context is
 	// cancelled during a retry delay, preventing halfOpenInFlight leak.

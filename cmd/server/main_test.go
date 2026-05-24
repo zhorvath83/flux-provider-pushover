@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/zhorvath83/flux-provider-pushover/internal/config"
+	"github.com/zhorvath83/flux-provider-pushover/internal/handlers"
 	"github.com/zhorvath83/flux-provider-pushover/internal/server"
 )
 
@@ -79,6 +82,11 @@ func TestRunApp(t *testing.T) {
 }
 
 func TestRunApp_StartsAndStops(t *testing.T) {
+	sigCh := make(chan os.Signal, 1)
+	origSig := server.SignalChan
+	defer func() { server.SignalChan = origSig }()
+	server.SignalChan = func() chan os.Signal { return sigCh }
+
 	configLoader := func() (*config.Config, error) {
 		return &config.Config{
 			PushoverUserKey:  "test_user",
@@ -105,6 +113,16 @@ func TestRunApp_StartsAndStops(t *testing.T) {
 		t.Fatalf("App exited unexpectedly during startup: %v", err)
 	default:
 		// App is still running, which is the expected behavior
+	}
+
+	// Shut down the server to clean up the goroutine
+	sigCh <- syscall.SIGTERM
+
+	select {
+	case <-appDone:
+		// Server shut down cleanly
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunApp did not shut down within timeout")
 	}
 }
 
@@ -138,5 +156,67 @@ func TestMain_HealthCheckMode(t *testing.T) {
 	err := server.HealthCheck(ts.URL + "/health")
 	if err != nil {
 		t.Fatalf("HealthCheck failed: %v", err)
+	}
+}
+
+func TestRunApp_CreateDepsError(t *testing.T) {
+	original := createDeps
+	defer func() { createDeps = original }()
+
+	createDeps = func(cfg *config.Config, logger server.Logger) (*handlers.HandlerDependencies, error) {
+		return nil, fmt.Errorf("dependency creation failed")
+	}
+
+	configLoader := func() (*config.Config, error) {
+		return &config.Config{
+			PushoverUserKey:  "test_user",
+			PushoverAPIToken: "test_token",
+			PushoverURL:      "https://api.pushover.net/1/messages.json",
+			Port:             ":0",
+			BearerToken:      "Bearer test_token",
+		}, nil
+	}
+
+	logger := &MockLoggerForRun{}
+	err := RunApp(configLoader, logger)
+	if err == nil {
+		t.Fatal("Expected error from CreateServerDependencies")
+	}
+	if !strings.Contains(err.Error(), "dependency creation failed") {
+		t.Errorf("Expected error containing 'dependency creation failed', got: %v", err)
+	}
+}
+
+func TestRunApp_GracefulShutdown(t *testing.T) {
+	sigCh := make(chan os.Signal, 1)
+	origSig := server.SignalChan
+	defer func() { server.SignalChan = origSig }()
+	server.SignalChan = func() chan os.Signal { return sigCh }
+
+	configLoader := func() (*config.Config, error) {
+		return &config.Config{
+			PushoverUserKey:  "test_user",
+			PushoverAPIToken: "test_token",
+			PushoverURL:      "https://api.pushover.net/1/messages.json",
+			Port:             ":0",
+			BearerToken:      "Bearer test_token",
+		}, nil
+	}
+
+	logger := &MockLoggerForRun{}
+	done := make(chan error, 1)
+	go func() { done <- RunApp(configLoader, logger) }()
+
+	time.Sleep(150 * time.Millisecond)
+
+	sigCh <- syscall.SIGTERM
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Expected nil on graceful shutdown, got: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunApp did not complete within timeout")
 	}
 }

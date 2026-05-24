@@ -8,6 +8,9 @@ import (
 	"github.com/zhorvath83/flux-provider-pushover/internal/server"
 )
 
+// createDeps allows overriding CreateServerDependencies in tests.
+var createDeps = handlers.CreateServerDependencies
+
 // RunApp runs the application with dependency injection (testable)
 func RunApp(configLoader config.ConfigLoader, logger server.Logger) error {
 	cfg, err := config.WithValidation(configLoader, config.ValidateConfig)()
@@ -15,7 +18,7 @@ func RunApp(configLoader config.ConfigLoader, logger server.Logger) error {
 		return err
 	}
 
-	deps, err := handlers.CreateServerDependencies(cfg, logger)
+	deps, err := createDeps(cfg, logger)
 	if err != nil {
 		return err
 	}
