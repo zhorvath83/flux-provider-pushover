@@ -1,13 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/zhorvath83/flux-provider-pushover/internal/types"
 )
 
 func TestIPRateLimiter_AllowWithinBurst(t *testing.T) {
@@ -240,15 +242,11 @@ func TestRateLimitMiddleware_ResponseFormat(t *testing.T) {
 		t.Errorf("Expected %d, got %d", http.StatusTooManyRequests, rr.Code)
 	}
 
-	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
-		t.Errorf("Expected Content-Type application/json, got %q", ct)
+	if ct := rr.Header().Get("Content-Type"); ct != types.ContentTypeJSON {
+		t.Errorf("Expected Content-Type %s, got %q", types.ContentTypeJSON, ct)
 	}
 
-	body := strings.TrimSpace(rr.Body.String())
-	if !strings.HasPrefix(body, "{") || !strings.HasSuffix(body, "}") {
-		t.Errorf("Expected JSON response body, got %q", body)
-	}
-	if !strings.Contains(body, "Rate limit exceeded") {
-		t.Errorf("Expected error message in body, got %q", body)
+	if !bytes.Equal(rr.Body.Bytes(), types.ResponseRateLimitError) {
+		t.Errorf("Expected body %q, got %q", types.ResponseRateLimitError, rr.Body.String())
 	}
 }

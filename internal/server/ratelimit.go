@@ -1,17 +1,15 @@
 package server
 
 import (
-	"fmt"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/zhorvath83/flux-provider-pushover/internal/types"
 	"golang.org/x/time/rate"
 )
-
-// RateLimiterConfig configures per-IP rate limiting.
 type RateLimiterConfig struct {
 	Rate  rate.Limit   // Tokens per second
 	Burst int          // Maximum burst size
@@ -128,9 +126,7 @@ func RateLimitMiddleware(rl *IPRateLimiter, logger Logger) func(http.Handler) ht
 			ip := extractIP(r)
 			if !rl.Allow(ip) {
 				logger.Warn("rate limit exceeded", "remote_addr", r.RemoteAddr, "ip", ip)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusTooManyRequests)
-				w.Write([]byte(fmt.Sprintf(`{"error":"Rate limit exceeded"}`)))
+				writeJSONResponse(w, http.StatusTooManyRequests, types.ResponseRateLimitError)
 				return
 			}
 			next.ServeHTTP(w, r)

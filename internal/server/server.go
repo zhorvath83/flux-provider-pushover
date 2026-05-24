@@ -134,3 +134,10 @@ func HealthCheck(url string) error {
 var healthCheckClient = &http.Client{
 	Timeout: 2 * time.Second,
 }
+
+// writeJSONResponse writes a JSON response with proper headers.
+func writeJSONResponse(w http.ResponseWriter, statusCode int, body []byte) {
+	w.Header().Set("Content-Type", types.ContentTypeJSON)
+	w.WriteHeader(statusCode)
+	w.Write(body)
+}

@@ -58,6 +58,7 @@ var (
 	ResponseInvalidJSON      = []byte(`{"error": "Invalid JSON"}`)
 	ResponseMethodNotAllowed = []byte(`{"error": "Method not allowed"}`)
 	ResponseUpstreamError    = []byte(`{"error": "Upstream service unavailable"}`)
+	ResponseRateLimitError   = []byte(`{"error": "Rate limit exceeded"}`)
 	ResponseRootError        = []byte("Requests need to be made to /webhook")
 	ResponseHealthy          = []byte("healthy")
 )

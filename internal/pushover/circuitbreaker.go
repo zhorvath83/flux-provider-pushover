@@ -119,6 +119,17 @@ func (cb *CircuitBreaker) RecordFailure() {
 	}
 }
 
+// Release decrements the half-open in-flight counter without recording
+// success or failure. Call this when a probe is abandoned due to external
+// cancellation (e.g., context timeout), not due to service failure.
+func (cb *CircuitBreaker) Release() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	if cb.state == CircuitHalfOpen && cb.halfOpenInFlight > 0 {
+		cb.halfOpenInFlight--
+	}
+}
+
 // State returns the current circuit state (for testing/monitoring).
 func (cb *CircuitBreaker) State() CircuitState {
 	cb.mu.Lock()

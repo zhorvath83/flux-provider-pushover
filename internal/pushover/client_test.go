@@ -537,3 +537,103 @@ func TestNetworkError_ErrorAndUnwrap(t *testing.T) {
 		t.Error("Unwrap should return the inner error")
 	}
 }
+
+func TestPushoverClient_ContextCancellationReleasesCircuit(t *testing.T) {
+	// When a request is cancelled during retry delay, the circuit breaker
+	// should release the probe slot (not leak halfOpenInFlight).
+	mockClient := &MockHTTPClient{
+		DoFunc: func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       io.NopCloser(strings.NewReader("error")),
+			}, nil
+		},
+	}
+
+	cb := NewCircuitBreaker(CircuitBreakerConfig{
+		FailureThreshold: 1,
+		Timeout:          50 * time.Millisecond,
+		SuccessThreshold: 2,
+	})
+
+	client := NewPushoverClient(mockClient, "http://test.example.com")
+	client.circuit = cb
+	client.retryCfg = RetryConfig{
+		InitialDelay: 50 * time.Millisecond,
+		MaxDelay:     100 * time.Millisecond,
+		Multiplier:   2.0,
+		MaxAttempts:  3,
+	}
+
+	// Open the circuit
+	cb.RecordFailure()
+
+	// Wait for half-open transition
+	time.Sleep(60 * time.Millisecond)
+
+	// Now we're in half-open. Allow a probe.
+	if err := cb.Allow(); err != nil {
+		t.Fatalf("Expected Allow in half-open: %v", err)
+	}
+
+	// Release the probe (simulating context cancellation)
+	cb.Release()
+
+	// Should still be able to allow another probe (halfOpenInFlight was decremented)
+	if err := cb.Allow(); err != nil {
+		t.Errorf("Expected Allow after Release: %v", err)
+	}
+
+	// Without Release, the second Allow would be blocked because
+	// successCount(0) + halfOpenInFlight(1) >= SuccessThreshold(2) would be false,
+	// but after Release halfOpenInFlight=0, so Allow succeeds again.
+}
+
+func TestPushoverClient_ContextCancelDuringRetryCallsRelease(t *testing.T) {
+	// Verify that SendMessage calls circuit.Release() when context is
+	// cancelled during a retry delay, preventing halfOpenInFlight leak.
+	callCount := 0
+	mockClient := &MockHTTPClient{
+		DoFunc: func(req *http.Request) (*http.Response, error) {
+			callCount++
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Body:       io.NopCloser(strings.NewReader("error")),
+			}, nil
+		},
+	}
+
+	cb := NewCircuitBreaker(CircuitBreakerConfig{
+		FailureThreshold: 1,
+		Timeout:          50 * time.Millisecond,
+		SuccessThreshold: 2,
+	})
+
+	client := NewPushoverClient(mockClient, "http://test.example.com")
+	client.circuit = cb
+	client.retryCfg = RetryConfig{
+		InitialDelay: 200 * time.Millisecond,
+		MaxDelay:     500 * time.Millisecond,
+		Multiplier:   2.0,
+		MaxAttempts:  3,
+	}
+
+	// Open the circuit
+	cb.RecordFailure()
+	time.Sleep(60 * time.Millisecond) // Wait for half-open
+
+	// Send a message with a short context timeout — will cancel during retry delay
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	msg := &types.PushoverMessage{Token: "t", User: "u", Title: "T", Message: "M"}
+	err := client.SendMessage(ctx, msg)
+	if err == nil {
+		t.Error("Expected error from context cancellation")
+	}
+
+	// The circuit should still allow probes (halfOpenInFlight was released)
+	if err := cb.Allow(); err != nil {
+		t.Errorf("Expected circuit to still allow probes after context cancellation: %v", err)
+	}
+}

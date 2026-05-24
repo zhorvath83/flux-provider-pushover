@@ -77,6 +77,7 @@ func (p *PushoverClient) SendMessage(ctx context.Context, msg *types.PushoverMes
 			delay := p.backoffDelay(attempt)
 			select {
 			case <-ctx.Done():
+				p.circuit.Release()
 				return ctx.Err()
 			case <-time.After(delay):
 			}
