@@ -461,8 +461,8 @@ func TestBackoffDelay_CappedAtMax(t *testing.T) {
 
 func TestIsRetryableStatus(t *testing.T) {
 	tests := []struct {
-		code       int
-		retryable  bool
+		code      int
+		retryable bool
 	}{
 		{http.StatusOK, false},
 		{http.StatusBadRequest, false},
