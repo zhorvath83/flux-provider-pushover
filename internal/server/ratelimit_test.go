@@ -1,8 +1,11 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -166,5 +169,86 @@ func TestIPRateLimiter_CleanupRemovesIdleBuckets(t *testing.T) {
 
 	if countAfter != 0 {
 		t.Errorf("Expected 0 buckets after cleanup, got %d", countAfter)
+	}
+}
+
+func TestIPRateLimiter_Concurrent(t *testing.T) {
+	rl := NewIPRateLimiter(RateLimiterConfig{
+		Rate:  1000,
+		Burst: 5000,
+		TTL:   1 * time.Hour,
+	})
+	defer rl.Stop()
+
+	var wg sync.WaitGroup
+	allowed := int64(0)
+	rejected := int64(0)
+	var countMu sync.Mutex
+
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(ip string) {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				if rl.Allow(ip) {
+					countMu.Lock()
+					allowed++
+					countMu.Unlock()
+				} else {
+					countMu.Lock()
+					rejected++
+					countMu.Unlock()
+				}
+			}
+		}(fmt.Sprintf("10.0.%d.%d", i/256, i%256))
+	}
+	wg.Wait()
+
+	if allowed == 0 {
+		t.Error("Expected some requests to be allowed")
+	}
+	// With 100 IPs × 50 requests = 5000 total, burst 5000 per IP, rate 1000/s
+	// all should be allowed in the first burst
+	t.Logf("Concurrent test: %d allowed, %d rejected", allowed, rejected)
+}
+
+func TestRateLimitMiddleware_ResponseFormat(t *testing.T) {
+	rl := NewIPRateLimiter(RateLimiterConfig{
+		Rate:  1,
+		Burst: 1,
+		TTL:   1 * time.Hour,
+	})
+	defer rl.Stop()
+
+	logger := &MockLogger{}
+
+	handler := RateLimitMiddleware(rl, logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Exhaust burst
+	req := httptest.NewRequest("GET", "/webhook", nil)
+	req.RemoteAddr = "1.2.3.4:1234"
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	// Next request should be rate limited
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Errorf("Expected %d, got %d", http.StatusTooManyRequests, rr.Code)
+	}
+
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Expected Content-Type application/json, got %q", ct)
+	}
+
+	body := strings.TrimSpace(rr.Body.String())
+	if !strings.HasPrefix(body, "{") || !strings.HasSuffix(body, "}") {
+		t.Errorf("Expected JSON response body, got %q", body)
+	}
+	if !strings.Contains(body, "Rate limit exceeded") {
+		t.Errorf("Expected error message in body, got %q", body)
 	}
 }

@@ -147,3 +147,26 @@ func TestHealthCheck_RealServer(t *testing.T) {
 
 	_ = srv
 }
+
+func TestHealthCheck_Timeout(t *testing.T) {
+	// Verify that the 2-second health check client timeout works:
+	// a server that takes longer than 2s should cause a timeout error.
+	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(3 * time.Second)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer slowServer.Close()
+
+	start := time.Now()
+	err := HealthCheck(slowServer.URL + "/health")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Error("Expected error for slow server, got nil")
+	}
+
+	// The error should occur within approximately 2 seconds (the client timeout)
+	if elapsed > 3*time.Second {
+		t.Errorf("Health check took too long: %v, expected ~2s timeout", elapsed)
+	}
+}

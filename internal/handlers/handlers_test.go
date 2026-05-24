@@ -481,3 +481,81 @@ func TestCreateWebhookHandler_AuthTimingSafe(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateWebhookHandler_NoUpstreamErrorLeakage(t *testing.T) {
+	cfg := &config.Config{
+		PushoverAPIToken: "test_token",
+		PushoverUserKey:  "test_user",
+		BearerToken:      "Bearer test_token",
+	}
+
+	pushoverErr := fmt.Errorf("pushover API returned status 400: {\"errors\":[\"application token is invalid\"]}")
+
+	deps := &HandlerDependencies{
+		Config: cfg,
+		PushoverClient: &MockPushoverClient{
+			SendMessageFunc: func(ctx context.Context, msg *types.PushoverMessage) error {
+				return pushoverErr
+			},
+		},
+		Logger:         &MockLogger{},
+		MessageBuilder: BuildPushoverMessage,
+	}
+
+	handler := CreateWebhookHandler(deps)
+
+	alert := types.FluxAlert{Severity: "error", Message: "test"}
+	body, _ := json.Marshal(alert)
+
+	req, _ := http.NewRequest("POST", "/webhook", bytes.NewBuffer(body))
+	req.Header.Set("Authorization", "Bearer test_token")
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Errorf("Expected %d, got %d", http.StatusBadGateway, rr.Code)
+	}
+
+	if bytes.Equal(rr.Body.Bytes(), types.ResponseUpstreamError) {
+		// Response is exactly the generic error — no upstream details
+	} else {
+		// Check that upstream error specifics are NOT in the response
+		respBody := rr.Body.String()
+		if strings.Contains(respBody, "application token") {
+			t.Error("Response leaks upstream error details: contains 'application token'")
+		}
+		if strings.Contains(respBody, "pushover") {
+			t.Error("Response leaks upstream error details: contains 'pushover'")
+		}
+		if strings.Contains(respBody, "400") {
+			t.Error("Response leaks upstream error details: contains status code 400")
+		}
+	}
+}
+
+func BenchmarkAuthCompare(b *testing.B) {
+	cfg := &config.Config{
+		PushoverAPIToken: "test_token",
+		PushoverUserKey:  "test_user",
+		BearerToken:      "Bearer test_token_abcdef1234567890",
+	}
+
+	deps := &HandlerDependencies{
+		Config:         cfg,
+		PushoverClient: &MockPushoverClient{},
+		Logger:         &MockLogger{},
+		MessageBuilder: BuildPushoverMessage,
+	}
+
+	handler := CreateWebhookHandler(deps)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		req, _ := http.NewRequest("POST", "/webhook", nil)
+		req.Header.Set("Authorization", "Bearer wrong_token_abcdef1234567890")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+	}
+}

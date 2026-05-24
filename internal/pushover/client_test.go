@@ -403,3 +403,137 @@ func TestRetryableError_Error(t *testing.T) {
 		t.Errorf("Expected %q, got %q", expected, err.Error())
 	}
 }
+
+func TestBackoffDelay(t *testing.T) {
+	cfg := RetryConfig{
+		InitialDelay: 200 * time.Millisecond,
+		MaxDelay:     2 * time.Second,
+		Multiplier:   2.0,
+		MaxAttempts:  5,
+	}
+	client := NewPushoverClient(&MockHTTPClient{}, "http://test.example.com")
+	client.retryCfg = cfg
+
+	tests := []struct {
+		attempt    int
+		minDelayMs int64
+		maxDelayMs int64
+	}{
+		{1, 100, 200},  // 200ms * 2^0 = 200ms, -50% jitter → 100-200ms
+		{2, 200, 400},  // 200ms * 2^1 = 400ms, -50% jitter → 200-400ms
+		{3, 400, 800},  // 200ms * 2^2 = 800ms, -50% jitter → 400-800ms
+		{4, 800, 2000}, // 200ms * 2^3 = 1600ms, capped at 2000, → 800-2000ms
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("attempt_%d", tt.attempt), func(t *testing.T) {
+			delay := client.backoffDelay(tt.attempt)
+			minDelay := time.Duration(tt.minDelayMs) * time.Millisecond
+			maxDelay := time.Duration(tt.maxDelayMs) * time.Millisecond
+
+			if delay < minDelay {
+				t.Errorf("Attempt %d: delay %v is below minimum %v", tt.attempt, delay, minDelay)
+			}
+			if delay > maxDelay {
+				t.Errorf("Attempt %d: delay %v exceeds maximum %v", tt.attempt, delay, maxDelay)
+			}
+		})
+	}
+}
+
+func TestBackoffDelay_CappedAtMax(t *testing.T) {
+	cfg := RetryConfig{
+		InitialDelay: 1 * time.Second,
+		MaxDelay:     2 * time.Second,
+		Multiplier:   2.0,
+		MaxAttempts:  10,
+	}
+	client := NewPushoverClient(&MockHTTPClient{}, "http://test.example.com")
+	client.retryCfg = cfg
+
+	for attempt := 1; attempt <= 10; attempt++ {
+		delay := client.backoffDelay(attempt)
+		if delay > cfg.MaxDelay {
+			t.Errorf("Attempt %d: delay %v exceeds max %v", attempt, delay, cfg.MaxDelay)
+		}
+	}
+}
+
+func TestIsRetryableStatus(t *testing.T) {
+	tests := []struct {
+		code       int
+		retryable  bool
+	}{
+		{http.StatusOK, false},
+		{http.StatusBadRequest, false},
+		{http.StatusUnauthorized, false},
+		{http.StatusForbidden, false},
+		{http.StatusNotFound, false},
+		{http.StatusTooManyRequests, true},
+		{http.StatusInternalServerError, true},
+		{http.StatusBadGateway, true},
+		{http.StatusServiceUnavailable, true},
+		{http.StatusGatewayTimeout, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%d", tt.code), func(t *testing.T) {
+			result := isRetryableStatus(tt.code)
+			if result != tt.retryable {
+				t.Errorf("isRetryableStatus(%d) = %v, want %v", tt.code, result, tt.retryable)
+			}
+		})
+	}
+}
+
+func TestPushoverClient_CircuitBreakerIntegration(t *testing.T) {
+	callCount := 0
+	mockClient := &MockHTTPClient{
+		DoFunc: func(req *http.Request) (*http.Response, error) {
+			callCount++
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Body:       io.NopCloser(strings.NewReader("unavailable")),
+			}, nil
+		},
+	}
+
+	client := NewPushoverClient(mockClient, "http://test.example.com")
+	client.retryCfg = RetryConfig{
+		InitialDelay: 1 * time.Millisecond,
+		MaxDelay:     5 * time.Millisecond,
+		Multiplier:   2.0,
+		MaxAttempts:  3,
+	}
+
+	msg := &types.PushoverMessage{Token: "t", User: "u", Title: "T", Message: "M"}
+
+	// Exhaust retries 5 times to trigger circuit breaker (FailureThreshold=5)
+	for i := 0; i < 5; i++ {
+		client.SendMessage(context.Background(), msg)
+	}
+
+	callCount = 0
+
+	// Circuit should now be open — calls should be rejected immediately
+	err := client.SendMessage(context.Background(), msg)
+	if err == nil {
+		t.Error("Expected circuit breaker to reject request")
+	}
+	if callCount > 0 {
+		t.Errorf("Expected no HTTP calls when circuit is open, got %d", callCount)
+	}
+}
+
+func TestNetworkError_ErrorAndUnwrap(t *testing.T) {
+	inner := fmt.Errorf("connection refused")
+	err := &networkError{err: inner}
+
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("Expected error to contain 'connection refused', got %q", err.Error())
+	}
+
+	if err.Unwrap() != inner {
+		t.Error("Unwrap should return the inner error")
+	}
+}

@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -177,4 +179,84 @@ func TestSlogLogger(t *testing.T) {
 
 	// Derived logger should implement Logger interface
 	derived.Info("derived info")
+}
+
+func TestServer_BaseContextCancellation(t *testing.T) {
+	// Verify that the server's BaseContext is cancelled on Shutdown,
+	// which propagates cancellation to all in-flight requests.
+	cfg := &config.Config{Port: ":0"}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	logger := &MockLogger{}
+	srv := NewServer(cfg, handler, logger)
+
+	// Verify the server context exists and is not yet cancelled
+	if srv.serverCtx == nil {
+		t.Fatal("Expected serverCtx to be set")
+	}
+	if srv.serverCtx.Err() != nil {
+		t.Fatal("Expected serverCtx to not be cancelled yet")
+	}
+
+	// Start the server so it can accept connections
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+
+	// Shutdown should cancel the context
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+
+	// After shutdown, the server context should be cancelled
+	if srv.serverCtx.Err() == nil {
+		t.Error("Expected serverCtx to be cancelled after shutdown")
+	}
+}
+
+func TestServer_LargeHeaderRejected(t *testing.T) {
+	// Use a fixed port server to test MaxHeaderBytes enforcement.
+	// The net/http server rejects requests with headers exceeding MaxHeaderBytes
+	// with 431 Request Header Fields Too Large.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	srv := &http.Server{
+		Addr:           ":0",
+		Handler:        handler,
+		MaxHeaderBytes: types.MaxHeaderSize,
+	}
+
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("Failed to listen: %v", err)
+	}
+
+	go srv.Serve(ln)
+	defer srv.Close()
+
+	addr := ln.Addr().String()
+	url := "http://" + addr + "/"
+
+	// Send a request with a header larger than MaxHeaderSize (8KB)
+	largeHeader := strings.Repeat("x", 2*types.MaxHeaderSize)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("X-Large", largeHeader)
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		// Connection may be reset by the server, which is also acceptable
+		t.Logf("Request with oversized header resulted in connection error (acceptable): %v", err)
+	} else {
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusRequestHeaderFieldsTooLarge {
+			t.Errorf("Expected %d for oversized headers, got %d", http.StatusRequestHeaderFieldsTooLarge, resp.StatusCode)
+		}
+	}
 }

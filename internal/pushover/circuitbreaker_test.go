@@ -190,3 +190,98 @@ func TestCircuitBreaker_SuccessDecrementsFailureCount(t *testing.T) {
 		t.Error("Expected open after 3 total failures")
 	}
 }
+
+func TestCircuitBreaker_StateTransitions(t *testing.T) {
+	cb := NewCircuitBreaker(CircuitBreakerConfig{
+		FailureThreshold: 2,
+		Timeout:          50 * time.Millisecond,
+		SuccessThreshold: 2,
+	})
+
+	// closed → open: 2 failures
+	if cb.State() != CircuitClosed {
+		t.Fatal("Expected initial state closed")
+	}
+	cb.RecordFailure()
+	cb.RecordFailure()
+	if cb.State() != CircuitOpen {
+		t.Fatal("Expected open after 2 failures")
+	}
+
+	// open → half-open: wait for timeout
+	time.Sleep(60 * time.Millisecond)
+	if err := cb.Allow(); err != nil {
+		t.Fatalf("Expected Allow after timeout: %v", err)
+	}
+	if cb.State() != CircuitHalfOpen {
+		t.Fatal("Expected half-open after timeout")
+	}
+
+	// half-open → closed: 2 successes
+	if err := cb.Allow(); err != nil {
+		t.Fatalf("Expected Allow for second probe: %v", err)
+	}
+	cb.RecordSuccess()
+	if cb.State() != CircuitHalfOpen {
+		t.Fatal("Expected half-open after 1 success (need 2)")
+	}
+	cb.RecordSuccess()
+	if cb.State() != CircuitClosed {
+		t.Fatal("Expected closed after 2 successes")
+	}
+
+	// Verify we're back in closed and can process requests
+	cb.RecordSuccess()
+	if cb.State() != CircuitClosed {
+		t.Fatal("Expected still closed")
+	}
+}
+
+func TestCircuitBreaker_OpenRejectsThenAllowsAfterTimeout(t *testing.T) {
+	cb := NewCircuitBreaker(CircuitBreakerConfig{
+		FailureThreshold: 1,
+		Timeout:          50 * time.Millisecond,
+		SuccessThreshold: 1,
+	})
+
+	cb.RecordFailure()
+
+	// Immediately after failure, should reject
+	if err := cb.Allow(); err == nil {
+		t.Error("Expected rejection when open")
+	}
+
+	// After timeout, should transition to half-open and allow
+	time.Sleep(60 * time.Millisecond)
+	if err := cb.Allow(); err != nil {
+		t.Errorf("Expected Allow after timeout: %v", err)
+	}
+}
+
+func BenchmarkCircuitBreaker_Allow(b *testing.B) {
+	cb := NewCircuitBreaker(CircuitBreakerConfig{
+		FailureThreshold: 5,
+		Timeout:          1 * time.Second,
+		SuccessThreshold: 2,
+	})
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cb.Allow()
+		cb.RecordSuccess()
+	}
+}
+
+func BenchmarkCircuitBreaker_StateTransitions(b *testing.B) {
+	cb := NewCircuitBreaker(CircuitBreakerConfig{
+		FailureThreshold: 5,
+		Timeout:          1 * time.Hour, // Long timeout so open stays open
+		SuccessThreshold: 2,
+	})
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cb.RecordFailure()
+		_ = cb.Allow()
+	}
+}
